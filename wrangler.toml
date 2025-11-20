@@ -7,4 +7,4 @@ compatibility_date = "2024-05-01"
 [[d1_databases]]
 binding = "DB" # Nama binding (nggak kita pake di script, tapi wajib ada)
 database_name = "database-buku" # Ini NAMA yang bakal kita pake di script
-database_id = "148cd164-a43a-458a-b35a-177509b5d3c4" # ID database lu
+database_id = "0e3ca043-c421-4cfa-bbe0-27f012c25ba3" # ID database lu
