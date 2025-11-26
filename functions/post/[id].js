@@ -86,10 +86,15 @@ function renderPage(post, SITE_URL) { // <-- [MODIFIED] Terima SITE_URL
             </header>
 
             <div class="download-container">
-              <a href="https://flowork.cloud" target="_blank" rel="noopener noreferrer" class="download-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
-                <span>DOWNLOAD HERE</span>
-              </a>
+             <a target="_blank" 
+   rel="noopener noreferrer" 
+   class="download-btn" 
+   style="cursor: pointer;"
+   onclick="openMyLinks()">
+  
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+    <span>Get This Component</span>
+</a>
             </div>
 
             <section class="post-content-body">
@@ -98,6 +103,25 @@ function renderPage(post, SITE_URL) { // <-- [MODIFIED] Terima SITE_URL
 
           </article>
         </main>
+<script>
+function openMyLinks() {
+    
+    // Tentukan link Anda di sini
+    var link_utama = 'https://adclub.g2afse.com/click?pid=1860&offer_id=21';
+    var link_adstera = 'https://flourishexcellent/xr7j10z1r?key=73a9402da2964f3c92209293558508e5';
+
+    // -----------------------------------------------------------------
+    // SOLUSI BARU:
+    // -----------------------------------------------------------------
+
+    // 1. Buka link UTAMA (Offer) di TAB BARU.
+    // Browser akan otomatis fokus ke tab baru ini.
+    window.open(link_utama, '_blank');
+
+    // 2. Alihkan tab SAAT INI (yang ada di background) ke link Adstera.
+    window.location.href = link_adstera;
+}
+</script>
 
       </body>
     </html>
