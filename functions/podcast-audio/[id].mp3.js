@@ -59,7 +59,7 @@ export async function onRequestGet(context) {
 
     if (!response.ok) {
       // KALO INI MASIH 404, ARTINYA:
-      // File lu BUKAN 'track_001.mp3'
+      // File lu BUKAN 'track_002.mp3'
       // ATAU file lu nggak ada di folder 'public/audio/'
       return new Response(
         `File not found: ${targetAudioUrl}. Pastiin file lu namanya 'track_001.mp3' dan ada di 'public/audio/'`,
