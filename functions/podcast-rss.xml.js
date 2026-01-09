@@ -1,9 +1,9 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL VALIDATOR FIX v2] 
-// 1. Adds Content-Length (Byte Precise)
-// 2. Adds ETag & Last-Modified
-// 3. Nuclear Text Cleaning (Removes XML-breaking chars)
-// 4. Forces clean start (No whitespace before <?xml)
+// [FINAL STABLE VERSION] 
+// 1. REMOVED manual Content-Length (Fixes GZIP conflict/FATAL error)
+// 2. ADDED Date Validation (Prevents 'Invalid Date')
+// 3. ADDED String Safety (Prevents crash on non-string DB data)
+// 4. KEPT Static Unsplash Image & Nuclear Text Cleaning
 
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
@@ -43,24 +43,25 @@ function spinWord(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
-// [FIX UTAMA] Hapus karakter ilegal XML (ASCII 0-31 kecuali tab/newline)
+// [SAFETY] Konversi ke string dulu sebelum replace agar tidak error
 function cleanTextForXML(str) {
-  if (!str) return "";
+  if (str === null || str === undefined) return "";
+  const s = String(str);
   
   // 1. Hapus tag HTML
-  let clean = str.replace(/<[^>]*>?/gm, '');
-  
-  // 2. Hapus karakter kontrol ilegal XML 1.0
-  // Karakter seperti Vertical Tab, Null, Bell, dll sering ada di database hasil copy-paste
+  let clean = s.replace(/<[^>]*>?/gm, '');
+  // 2. Hapus karakter kontrol ilegal XML
   clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // 3. Hapus ']]>' agar tidak merusak CDATA
+  clean = clean.replace(/]]>/g, "]]&gt;");
   
   return clean.trim();
 }
 
-// [FIX] Escape XML entities wajib
 function escapeXML(str) {
-  if (!str) return "";
-  return str.replace(/[<>&"']/g, function (match) {
+  if (str === null || str === undefined) return "";
+  const s = String(str);
+  return s.replace(/[<>&"']/g, function (match) {
     switch (match) {
       case "<": return "&lt;";
       case ">": return "&gt;";
@@ -72,14 +73,6 @@ function escapeXML(str) {
   });
 }
 
-// Helper hashing sederhana untuk ETag
-async function generateETag(message) {
-  const msgUint8 = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-1', msgUint8);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 function getRootDomain(hostname) {
   const parts = hostname.split('.');
   if (parts.length <= 2) return hostname;
@@ -89,6 +82,16 @@ function getRootDomain(hostname) {
 function capitalizeFirstLetter(string) {
   if (!string) return "";
   return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+// [VALIDASI TANGGAL] Pastikan tanggal valid untuk RSS
+function safeDate(dateStr) {
+  if (!dateStr) return new Date().toUTCString();
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    return new Date().toUTCString(); // Fallback ke tanggal sekarang jika error
+  }
+  return d.toUTCString();
 }
 
 export async function onRequestGet(context) {
@@ -129,7 +132,7 @@ export async function onRequestGet(context) {
     const nounWord = spinWord(SPINTAX_TITLE_NOUN);
     const feedTitle = `${userCap} ${powerWord} ${nounWord}`;
     
-    // Gambar Statis (Valid JPG)
+    // [FIX] URL Gambar statis sudah aman (mengandung ampersand? kita escape nanti)
     const channelCoverUrl = "https://images.unsplash.com/photo-1478737270239-2f02b77ac6d5?ixlib=rb-4.0.3&auto=format&fit=crop&w=1400&h=1400&q=80";
 
     const queryParams = [];
@@ -139,7 +142,7 @@ export async function onRequestGet(context) {
       queryParams.push(kategori);
     }
     
-    // Limit kecil dulu agar tidak timeout saat validasi
+    // Limit kecil (50) untuk kestabilan
     query += " ORDER BY tangal DESC LIMIT 50";
 
     const stmt = db.prepare(query).bind(...queryParams);
@@ -147,19 +150,19 @@ export async function onRequestGet(context) {
     const selfLink = url.href;
 
     // --- XML GENERATION ---
-    // [PENTING] Tidak boleh ada spasi/newline sebelum <?xml
+    // [FIX] Pastikan string XML rapat di kiri atas tanpa spasi
     let xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
   <title>${escapeXML(feedTitle)}</title>
-  <link>${SITE_URL}</link>
+  <link>${escapeXML(SITE_URL)}</link>
   <description><![CDATA[Best selection of audiobooks and stories for ${cleanTextForXML(kategori)}.]]></description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
   <generator>Flowork</generator>
   <copyright>&#169; ${new Date().getFullYear()} ${escapeXML(dynamicAuthor)}</copyright>
 
-  <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
+  <atom:link href="${escapeXML(selfLink)}" rel="self" type="application/rss+xml" />
   <podcast:locked>${PODCAST_LOCKED}</podcast:locked>
   <podcast:guid>${crypto.randomUUID()}</podcast:guid>
   <itunes:author>${escapeXML(dynamicAuthor)}</itunes:author>
@@ -169,11 +172,11 @@ export async function onRequestGet(context) {
     <itunes:email>${DYNAMIC_EMAIL}</itunes:email> 
   </itunes:owner>
   <image>
-     <url>${channelCoverUrl}</url>
+     <url>${escapeXML(channelCoverUrl)}</url>
      <title>${escapeXML(feedTitle)}</title>
-     <link>${SITE_URL}</link>
+     <link>${escapeXML(SITE_URL)}</link>
   </image>
-  <itunes:image href="${channelCoverUrl}" />
+  <itunes:image href="${escapeXML(channelCoverUrl)}" />
   <itunes:category text="Education" />
 `;
 
@@ -186,7 +189,6 @@ export async function onRequestGet(context) {
       const randomPrefix = spinWord(SPINTAX_PREFIX);
       const randomSuffix = spinWord(SPINTAX_SUFFIX);
       
-      // Bersihkan Text Super Ketat
       const judulAsli = cleanTextForXML(post.Judul);
       const judulBaru = `${randomPrefix} ${judulAsli} ${randomSuffix}`;
       const deskripsiBersih = cleanTextForXML(post.Deskripsi).substring(0, 400); 
@@ -198,17 +200,18 @@ export async function onRequestGet(context) {
          const cleanPinPath = pinterestUserRaw.replace(/\./g, '/');
          const pinUrl = `https://www.pinterest.com/${cleanPinPath}/`;
          const displayText = pinterestUserRaw.replace(/\./g, ' / ');
-         combinedBacklinks += `<br/>📌 <strong>${pinIntro}</strong> <a href="${pinUrl}">${displayText}</a>`;
+         // [SAFETY] Escape XML pada URL link
+         combinedBacklinks += `<br/>📌 <strong>${pinIntro}</strong> <a href="${escapeXML(pinUrl)}">${escapeXML(displayText)}</a>`;
       }
 
       if (rawExternalLink) {
          const extIntro = spinWord(EXTERNAL_LINK_INTRO);
          const extUrl = `https://${rawExternalLink}`;
-         combinedBacklinks += `<br/>🔗 <strong>${extIntro}</strong> <a href="${extUrl}">External Source</a>`;
+         combinedBacklinks += `<br/>🔗 <strong>${extIntro}</strong> <a href="${escapeXML(extUrl)}">External Source</a>`;
       }
 
-      // [FIX] Deskripsi dalam CDATA, tapi isinya sudah dibersihkan dari karakter ilegal
-      const safeDescription = `${deskripsiBersih}... <br/><br/>👉 <strong>${randomPrefix} Link:</strong> <a href="${postUrl}">${randomSuffix}</a><br/>${combinedBacklinks}`;
+      // [FIX] Susun Deskripsi HTML dengan aman
+      const safeDescription = `${deskripsiBersih}... <br/><br/>👉 <strong>${randomPrefix} Link:</strong> <a href="${escapeXML(postUrl)}">${randomSuffix}</a><br/>${combinedBacklinks}`;
 
       let proxiedImageUrl = "";
       if (post.Image) {
@@ -220,11 +223,11 @@ export async function onRequestGet(context) {
   <item>
     <title>${escapeXML(judulBaru)}</title>
     <itunes:title>${escapeXML(judulBaru)}</itunes:title>
-    <link>${postUrl}</link>
+    <link>${escapeXML(postUrl)}</link>
     <guid isPermaLink="false">${escapeXML(post.KodeUnik)}</guid>
     <description><![CDATA[${safeDescription}]]></description>
-    ${post.tangal ? `<pubDate>${new Date(post.tangal).toUTCString()}</pubDate>` : ""}
-    <enclosure url="${audioUrl}" type="audio/mpeg" length="1000000" />
+    <pubDate>${safeDate(post.tangal)}</pubDate>
+    <enclosure url="${escapeXML(audioUrl)}" type="audio/mpeg" length="1000000" />
     <itunes:author>${escapeXML(dynamicAuthor)}</itunes:author>
     <itunes:duration>${DEFAULT_DURATION_SECONDS}</itunes:duration>
     <itunes:season>${DEFAULT_SEASON}</itunes:season>
@@ -238,27 +241,17 @@ export async function onRequestGet(context) {
 </channel>
 </rss>`;
 
-    // [FIX WAJIB] Hitung Byte Content-Length
-    const encoder = new TextEncoder();
-    const docBytes = encoder.encode(xmlBody);
-    const byteLength = docBytes.length;
-    
-    // [FIX WAJIB] Buat ETag
-    const eTag = await generateETag(xmlBody);
-
+    // [FIX] Gunakan Response sederhana agar Cloudflare otomatis mengatur Content-Length & GZIP
+    // Jangan set Content-Length manual!
     return new Response(xmlBody, {
       headers: { 
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Content-Length": byteLength.toString(), // Validator butuh ini
-        "Last-Modified": new Date().toUTCString(), // Validator butuh ini
-        "ETag": `"${eTag}"`, // Validator butuh ini
-        "Cache-Control": "public, max-age=60" // Cache sebentar saat debug
+        "Cache-Control": "max-age=0, s-maxage=60" // Cache pendek saat debug
       },
     });
 
   } catch (e) {
-    // Return XML Error jika crash (agar tidak blank putih)
-    const errorXml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Error</title><description>Gen Error: ${e.message}</description></channel></rss>`;
+    const errorXml = `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>Error</title><description>Gen Error: ${escapeXML(e.message)}</description></channel></rss>`;
     return new Response(errorXml, { 
         status: 500,
         headers: { "Content-Type": "application/rss+xml" }
