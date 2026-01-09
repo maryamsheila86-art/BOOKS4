@@ -1,8 +1,9 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL VALIDATOR EDITION - STABLE IMAGE FIX]
-// 1. IMAGE SOURCE: Changed to Pexels (Direct JPG) because Wikimedia is down.
-// 2. URL SAFETY: No special characters in image URL.
-// 3. VALIDATION: Includes ETag, Last-Modified, and aggressive text cleaning.
+// [FINAL FIX - THE TRIMMER]
+// 1. TRIM OUTPUT: Forces removal of any whitespace before <?xml (Crucial!)
+// 2. IMAGE: Uses Pexels (Clean JPG)
+// 3. CHARSET: Explicit UTF-8 enforcement
+// 4. SANITIZATION: Strict cleaning of DB content
 
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
@@ -42,15 +43,17 @@ function spinWord(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
-// [SAFETY] Membersihkan string dari karakter ilegal XML
+// [SAFETY] Membersihkan string dari karakter ilegal XML & Emoji yang bikin error
 function cleanTextForXML(str) {
   if (str === null || str === undefined) return "";
   const s = String(str);
   
   // 1. Hapus tag HTML
   let clean = s.replace(/<[^>]*>?/gm, '');
+  
   // 2. Hapus karakter kontrol (ASCII 0-31)
   clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  
   // 3. Fix CDATA closing tags
   clean = clean.replace(/]]>/g, "]]&gt;");
   
@@ -137,9 +140,7 @@ export async function onRequestGet(context) {
     const nounWord = spinWord(SPINTAX_TITLE_NOUN);
     const feedTitle = `${userCap} ${powerWord} ${nounWord}`;
     
-    // [FIX GAMBAR FINAL] 
-    // Menggunakan Pexels Direct Link (Book Concept).
-    // URL ini BERSIH: .jpeg murni, tanpa '?', tanpa '&'.
+    // IMAGE: Pexels (Clean, no query params, pure JPG)
     const channelCoverUrl = "https://images.pexels.com/photos/415071/pexels-photo-415071.jpeg";
 
     const queryParams = [];
@@ -149,7 +150,7 @@ export async function onRequestGet(context) {
       queryParams.push(kategori);
     }
     
-    // Limit kecil (50) untuk kestabilan load
+    // Limit kecil aman
     query += " ORDER BY tangal DESC LIMIT 50";
 
     const stmt = db.prepare(query).bind(...queryParams);
@@ -157,38 +158,11 @@ export async function onRequestGet(context) {
     const selfLink = url.href;
 
     // --- XML GENERATION ---
-    let xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
-<channel>
-  <title>${escapeXML(feedTitle)}</title>
-  <link>${escapeXML(SITE_URL)}</link>
-  <description><![CDATA[Best selection of audiobooks and stories for ${cleanTextForXML(kategori)}.]]></description>
-  <language>en-us</language>
-  <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-  <generator>Flowork</generator>
-  <copyright>&#169; ${new Date().getFullYear()} ${escapeXML(dynamicAuthor)}</copyright>
+    // Gunakan variabel sementara
+    let itemsXml = "";
 
-  <atom:link href="${escapeXML(selfLink)}" rel="self" type="application/rss+xml" />
-  <podcast:locked>${PODCAST_LOCKED}</podcast:locked>
-  <podcast:guid>${crypto.randomUUID()}</podcast:guid>
-  <itunes:author>${escapeXML(dynamicAuthor)}</itunes:author>
-  <itunes:type>episodic</itunes:type>
-  <itunes:owner>
-    <itunes:name>${escapeXML(dynamicAuthor)}</itunes:name>
-    <itunes:email>${DYNAMIC_EMAIL}</itunes:email> 
-  </itunes:owner>
-  <image>
-     <url>${channelCoverUrl}</url>
-     <title>${escapeXML(feedTitle)}</title>
-     <link>${escapeXML(SITE_URL)}</link>
-  </image>
-  <itunes:image href="${channelCoverUrl}" />
-  <itunes:category text="Education" />
-`;
-
-    const totalResults = results.length;
     results.forEach((post, i) => {
-      const episodeNumber = totalResults - i; 
+      const episodeNumber = results.length - i; 
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
 
@@ -217,14 +191,13 @@ export async function onRequestGet(context) {
 
       const safeDescription = `${deskripsiBersih}... <br/><br/>👉 <strong>${randomPrefix} Link:</strong> <a href="${escapeXML(postUrl)}">${randomSuffix}</a><br/>${combinedBacklinks}`;
 
-      // URL gambar item
       let proxiedImageUrl = "";
       if (post.Image) {
         const encodedImageUrl = encodeURIComponent(post.Image);
         proxiedImageUrl = `${SITE_URL}/image-proxy?url=${encodedImageUrl}`;
       }
 
-      xmlBody += `
+      itemsXml += `
   <item>
     <title>${escapeXML(judulBaru)}</title>
     <itunes:title>${escapeXML(judulBaru)}</itunes:title>
@@ -242,16 +215,48 @@ export async function onRequestGet(context) {
   </item>`;
     }); 
 
-    xmlBody += `
+    // RAKIT XML FINAL
+    // Perhatikan: Tidak ada spasi setelah backtick pertama!
+    const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>${escapeXML(feedTitle)}</title>
+  <link>${escapeXML(SITE_URL)}</link>
+  <description><![CDATA[Best selection of audiobooks and stories for ${cleanTextForXML(kategori)}.]]></description>
+  <language>en-us</language>
+  <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+  <generator>Flowork</generator>
+  <copyright>&#169; ${new Date().getFullYear()} ${escapeXML(dynamicAuthor)}</copyright>
+  <atom:link href="${escapeXML(selfLink)}" rel="self" type="application/rss+xml" />
+  <podcast:locked>${PODCAST_LOCKED}</podcast:locked>
+  <podcast:guid>${crypto.randomUUID()}</podcast:guid>
+  <itunes:author>${escapeXML(dynamicAuthor)}</itunes:author>
+  <itunes:type>episodic</itunes:type>
+  <itunes:owner>
+    <itunes:name>${escapeXML(dynamicAuthor)}</itunes:name>
+    <itunes:email>${DYNAMIC_EMAIL}</itunes:email> 
+  </itunes:owner>
+  <image>
+     <url>${channelCoverUrl}</url>
+     <title>${escapeXML(feedTitle)}</title>
+     <link>${escapeXML(SITE_URL)}</link>
+  </image>
+  <itunes:image href="${channelCoverUrl}" />
+  <itunes:category text="Education" />
+  ${itemsXml}
 </channel>
 </rss>`;
 
-    // Generate ETag untuk validator
-    const eTag = await generateETag(xmlBody);
+    // [FIX WAJIB] TRIM OUTPUT
+    // Ini membuang semua spasi/newline yang tidak sengaja muncul di awal file
+    const finalXml = xmlBody.trim();
 
-    return new Response(xmlBody, {
+    // Generate ETag dari final trimmed XML
+    const eTag = await generateETag(finalXml);
+
+    return new Response(finalXml, {
       headers: { 
-        "Content-Type": "application/rss+xml; charset=utf-8",
+        "Content-Type": "application/rss+xml; charset=utf-8", // Explicit Charset
         "Last-Modified": new Date().toUTCString(),
         "ETag": `"${eTag}"`,
         "Cache-Control": "public, max-age=60" 
