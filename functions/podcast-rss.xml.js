@@ -1,22 +1,40 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL VERSION] Support Pinterest Board (Use dot '.' as separator)
+// [FINAL VERSION] 
+// - Dynamic Email (Root Domain)
+// - Pinterest Board Support (User.Board)
+// - External Backlink Support
+// - [MODIFIED] Feed Title: Removed 'Category', added 'Noun' (Show/Channel/etc)
 
+// --- [SPINTAX CONFIGURATION] ---
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
-  "Télécharger", "Lire", "Obtenir", "Gratuit", 
-  "Herunterladen", "Lesen", "Holen", "Gratis", 
-  "Descargar", "Leer", "Obtener", 
-  "Scarica", "Leggi", 
-  "Downloaden" 
+  "Télécharger", "Lire", "Obtenir", "Gratuit", // FR
+  "Herunterladen", "Lesen", "Holen", "Gratis", // DE
+  "Descargar", "Leer", "Obtener", // ES
+  "Scarica", "Leggi", // IT
+  "Downloaden" // NL
 ];
 
 const SPINTAX_SUFFIX = [
   "PDF", "ePub", "Ebook", "Audiobook", "Full Version", 
-  "PDF Complet", "Livre Numérique", "Version Complète", 
-  "Vollversion", "E-Book Deutsch", 
-  "Libro Electrónico", "Versión Completa", 
-  "Versione Completa", 
+  "PDF Complet", "Livre Numérique", "Version Complète", // FR
+  "Vollversion", "E-Book Deutsch", // DE
+  "Libro Electrónico", "Versión Completa", // ES
+  "Versione Completa", // IT
   "PDF 2025", "High Quality"
+];
+
+// Power Words untuk Judul Feed (Kata Sifat)
+const SPINTAX_TITLE_ADJ = [
+  "Exclusive", "Top", "Best", "Premium", "Official", 
+  "Viral", "Trending", "Hot", "New", "Daily", 
+  "Ultimate", "Complete", "Master", "Pro", "Super"
+];
+
+// [NEW] Kata Benda untuk menggantikan Kategori di Judul
+const SPINTAX_TITLE_NOUN = [
+  "Podcast", "Show", "Channel", "Station", "Audio", 
+  "Series", "Hub", "Spot", "Zone", "Radio", "Network"
 ];
 
 const EXTERNAL_LINK_INTRO = [
@@ -60,6 +78,12 @@ function getRootDomain(hostname) {
   return parts.slice(-2).join('.');
 }
 
+// Helper untuk Capitalize huruf pertama nama user (miller -> Miller)
+function capitalizeFirstLetter(string) {
+  if (!string) return "";
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
 export async function onRequestGet(context) {
   const { env, request, params } = context;
   const db = env.DB;
@@ -76,10 +100,13 @@ export async function onRequestGet(context) {
     // --- PARSING URL ---
     const pathSegments = params.path || [];
     
-    const kategori = pathSegments[0] || "General";
+    // Kategori hanya untuk filter DB (misal: ebook1)
+    const kategori = pathSegments[0] || "General"; 
+    
+    // User untuk Email & Nama Channel
     const emailUser = pathSegments[1] || "admin";
     
-    // Segmen 3: Pinterest (Username ATAU Username.Board)
+    // Segmen 3: Pinterest
     const pinterestUserRaw = pathSegments[2] || ""; 
     
     // Segmen 4 dst: External Link
@@ -96,7 +123,17 @@ export async function onRequestGet(context) {
 
     const DYNAMIC_EMAIL = `${emailUser}@${ROOT_DOMAIN}`;
     const dynamicAuthor = `${emailUser} Media`; 
-    const feedTitle = `${escapeXML(kategori)} Audio Collection`;
+    
+    // --- [MODIFIED] FEED TITLE LOGIC ---
+    // Format: [User] [Power Word] [Noun]
+    // Tidak lagi membawa variabel 'kategori' (ebook1) ke tampilan
+    const userCap = capitalizeFirstLetter(emailUser);
+    const powerWord = spinWord(SPINTAX_TITLE_ADJ);
+    const nounWord = spinWord(SPINTAX_TITLE_NOUN);
+    
+    const feedTitle = `${userCap} ${powerWord} ${nounWord}`;
+    
+    // Cover Podcast: Tetap pakai kategori sebagai seed agar gambar konsisten per feed (ebook1 gambarnya A, ebook2 gambarnya B)
     const channelCoverUrl = `https://picsum.photos/1400/1400?random=${encodeURIComponent(kategori)}`;
 
     // Query DB
@@ -123,7 +160,7 @@ export async function onRequestGet(context) {
 <channel>
   <title>${feedTitle}</title>
   <link>${SITE_URL}</link>
-  <description><![CDATA[Best selection of ${escapeXML(kategori)} books and audiobooks.]]></description>
+  <description><![CDATA[Best selection of audiobooks and stories.]]></description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
   <generator>Flowork</generator>
@@ -159,17 +196,11 @@ export async function onRequestGet(context) {
 
       let combinedBacklinks = "";
 
-      // [MODIFIED] Pinterest Logic (Dot '.' replaced with Slash '/')
       if (pinterestUserRaw && pinterestUserRaw !== "0" && pinterestUserRaw !== "skip") {
          const pinIntro = spinWord(PINTEREST_INTRO);
-         
-         // Ganti titik (.) jadi slash (/) agar support board
          const cleanPinPath = pinterestUserRaw.replace(/\./g, '/');
          const pinUrl = `https://www.pinterest.com/${cleanPinPath}/`;
-         
-         // Tampilan teks link tetap rapi (titik diganti spasi atau biarkan)
          const displayText = pinterestUserRaw.replace(/\./g, ' / ');
-
          combinedBacklinks += `<br/>📌 <strong>${pinIntro}</strong> <a href="${pinUrl}">${displayText}</a>`;
       }
 
