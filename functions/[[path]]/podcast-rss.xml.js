@@ -1,8 +1,8 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL FIX - CLEAN IMAGE EDITION]
-// 1. FIXED FATAL ERROR: Replaced Unsplash URL (containing '&') with Clean Wikimedia URL
-// 2. This removes "encoding/formatting" issues permanently.
-// 3. Includes all previous fixes (ETag, Last-Modified, CDATA protection)
+// [FINAL VALIDATOR EDITION - STABLE IMAGE FIX]
+// 1. IMAGE SOURCE: Changed to Pexels (Direct JPG) because Wikimedia is down.
+// 2. URL SAFETY: No special characters in image URL.
+// 3. VALIDATION: Includes ETag, Last-Modified, and aggressive text cleaning.
 
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
@@ -137,10 +137,10 @@ export async function onRequestGet(context) {
     const nounWord = spinWord(SPINTAX_TITLE_NOUN);
     const feedTitle = `${userCap} ${powerWord} ${nounWord}`;
     
-    // [FIX UTAMA DI SINI] 
-    // Menggunakan gambar Wikimedia yang bersih. Tidak ada '&', '?', atau redirect.
-    // Ini menjamin XML valid 100%.
-    const channelCoverUrl = "https://upload.wikimedia.org/wikipedia/commons/4/4e/Library_of_Congress_Book.jpg";
+    // [FIX GAMBAR FINAL] 
+    // Menggunakan Pexels Direct Link (Book Concept).
+    // URL ini BERSIH: .jpeg murni, tanpa '?', tanpa '&'.
+    const channelCoverUrl = "https://images.pexels.com/photos/415071/pexels-photo-415071.jpeg";
 
     const queryParams = [];
     let query = "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
@@ -246,14 +246,14 @@ export async function onRequestGet(context) {
 </channel>
 </rss>`;
 
-    // Generate ETag untuk validator (memuaskan warning kuning)
+    // Generate ETag untuk validator
     const eTag = await generateETag(xmlBody);
 
     return new Response(xmlBody, {
       headers: { 
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Last-Modified": new Date().toUTCString(), // Validator butuh ini
-        "ETag": `"${eTag}"`, // Validator butuh ini
+        "Last-Modified": new Date().toUTCString(),
+        "ETag": `"${eTag}"`,
         "Cache-Control": "public, max-age=60" 
       },
     });
