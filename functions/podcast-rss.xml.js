@@ -1,40 +1,32 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL VERSION] 
-// - Dynamic Email (Root Domain)
-// - Pinterest Board Support (User.Board)
-// - External Backlink Support
-// - [MODIFIED] Feed Title: Removed 'Category', added 'Noun' (Show/Channel/etc)
+// [FINAL VALIDATOR FIX] 
+// 1. Adds Content-Length Header (Crucial for validators)
+// 2. Adds Last-Modified Header
+// 3. Aggressive Text Cleaning (Removes invisible chars)
+// 4. Static Image (Unsplash) to prevent redirect errors
 
-// --- [SPINTAX CONFIGURATION] ---
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
-  "Télécharger", "Lire", "Obtenir", "Gratuit", // FR
-  "Herunterladen", "Lesen", "Holen", "Gratis", // DE
-  "Descargar", "Leer", "Obtener", // ES
-  "Scarica", "Leggi", // IT
-  "Downloaden" // NL
+  "Télécharger", "Lire", "Obtenir", "Gratuit", 
+  "Herunterladen", "Lesen", "Holen", "Gratis", 
+  "Descargar", "Leer", "Obtener", "Scarica", "Leggi", "Downloaden" 
 ];
 
 const SPINTAX_SUFFIX = [
   "PDF", "ePub", "Ebook", "Audiobook", "Full Version", 
-  "PDF Complet", "Livre Numérique", "Version Complète", // FR
-  "Vollversion", "E-Book Deutsch", // DE
-  "Libro Electrónico", "Versión Completa", // ES
-  "Versione Completa", // IT
-  "PDF 2025", "High Quality"
+  "PDF Complet", "Version Complète", "Vollversion", 
+  "Libro Electrónico", "Versione Completa", "PDF 2025"
 ];
 
-// Power Words untuk Judul Feed (Kata Sifat)
 const SPINTAX_TITLE_ADJ = [
   "Exclusive", "Top", "Best", "Premium", "Official", 
   "Viral", "Trending", "Hot", "New", "Daily", 
-  "Ultimate", "Complete", "Master", "Pro", "Super"
+  "Ultimate", "Complete", "Master", "Pro"
 ];
 
-// [NEW] Kata Benda untuk menggantikan Kategori di Judul
 const SPINTAX_TITLE_NOUN = [
   "Podcast", "Show", "Channel", "Station", "Audio", 
-  "Series", "Hub", "Spot", "Zone", "Radio", "Network"
+  "Series", "Hub", "Spot", "Zone", "Network"
 ];
 
 const EXTERNAL_LINK_INTRO = [
@@ -44,18 +36,25 @@ const EXTERNAL_LINK_INTRO = [
 
 const PINTEREST_INTRO = [
   "Pin this:", "Saved on Pinterest:", "View our Board:", 
-  "Follow on Pinterest:", "See collection:", "Visual guide:"
+  "Follow on Pinterest:", "See collection:"
 ];
 
 function spinWord(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
-function truncateAndClean(str, length = 250) {
+// [FIX] Pembersih text super agresif untuk menjamin XML valid
+function cleanTextForXML(str) {
   if (!str) return "";
-  const cleanStr = str.replace(/<[^>]*>?/gm, '');
-  const truncated = cleanStr.substring(0, length);
-  return cleanStr.length > length ? truncated + "..." : truncated;
+  
+  // 1. Hapus tag HTML
+  let clean = str.replace(/<[^>]*>?/gm, '');
+  
+  // 2. Hapus karakter kontrol (0-31) kecuali Tab, Newline, Carriage Return
+  // Karakter ini sering bikin RSS "corrupt"
+  clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  
+  return clean.trim();
 }
 
 function escapeXML(str) {
@@ -78,7 +77,6 @@ function getRootDomain(hostname) {
   return parts.slice(-2).join('.');
 }
 
-// Helper untuk Capitalize huruf pertama nama user (miller -> Miller)
 function capitalizeFirstLetter(string) {
   if (!string) return "";
   return string.charAt(0).toUpperCase() + string.slice(1);
@@ -99,17 +97,10 @@ export async function onRequestGet(context) {
 
     // --- PARSING URL ---
     const pathSegments = params.path || [];
-    
-    // Kategori hanya untuk filter DB (misal: ebook1)
-    const kategori = pathSegments[0] || "General"; 
-    
-    // User untuk Email & Nama Channel
+    const kategori = pathSegments[0] || "General";
     const emailUser = pathSegments[1] || "admin";
-    
-    // Segmen 3: Pinterest
     const pinterestUserRaw = pathSegments[2] || ""; 
     
-    // Segmen 4 dst: External Link
     let rawExternalLink = "";
     if (pathSegments.length > 3) {
         const segmentsToJoin = pathSegments.slice(3);
@@ -124,34 +115,34 @@ export async function onRequestGet(context) {
     const DYNAMIC_EMAIL = `${emailUser}@${ROOT_DOMAIN}`;
     const dynamicAuthor = `${emailUser} Media`; 
     
-    // --- [MODIFIED] FEED TITLE LOGIC ---
-    // Format: [User] [Power Word] [Noun]
-    // Tidak lagi membawa variabel 'kategori' (ebook1) ke tampilan
     const userCap = capitalizeFirstLetter(emailUser);
     const powerWord = spinWord(SPINTAX_TITLE_ADJ);
     const nounWord = spinWord(SPINTAX_TITLE_NOUN);
-    
     const feedTitle = `${userCap} ${powerWord} ${nounWord}`;
     
-    // Cover Podcast: Tetap pakai kategori sebagai seed agar gambar konsisten per feed (ebook1 gambarnya A, ebook2 gambarnya B)
-    const channelCoverUrl = `https://picsum.photos/1400/1400?random=${encodeURIComponent(kategori)}`;
+    // [FIX] Gunakan gambar statis JPG yang VALID untuk lolos pengecekan awal
+    const channelCoverUrl = "https://images.unsplash.com/photo-1478737270239-2f02b77ac6d5?ixlib=rb-4.0.3&auto=format&fit=crop&w=1400&h=1400&q=80";
 
-    // Query DB
     const queryParams = [];
     let query = "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
     if (kategori && kategori !== "General") {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(kategori);
     }
-    query += " ORDER BY tangal DESC LIMIT 200";
+    
+    // [FIX] Limit kecil (50) agar proses cepat dan tidak timeout
+    query += " ORDER BY tangal DESC LIMIT 50";
 
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
     const selfLink = url.href;
 
     // --- XML GENERATION ---
-    let xml = `<?xml version="1.0" encoding="UTF-8" ?>
-<?xml-stylesheet href="https://flowork.cloud/podcast-style.xsl" type="text/xsl"?>
+    // Kita bangun string XML-nya dulu ke variabel
+    let xmlBody = "";
+    
+    // Header
+    xmlBody += `<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0"
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
   xmlns:podcast="https://podcastindex.org/namespace/1.0"
@@ -160,7 +151,7 @@ export async function onRequestGet(context) {
 <channel>
   <title>${feedTitle}</title>
   <link>${SITE_URL}</link>
-  <description><![CDATA[Best selection of audiobooks and stories.]]></description>
+  <description><![CDATA[Best selection of audiobooks and stories for ${escapeXML(kategori)}.]]></description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
   <generator>Flowork</generator>
@@ -180,6 +171,7 @@ export async function onRequestGet(context) {
      <title>${feedTitle}</title>
      <link>${SITE_URL}</link>
   </image>
+  <itunes:image href="${channelCoverUrl}" />
   <itunes:category text="Education" />
 `;
 
@@ -191,8 +183,11 @@ export async function onRequestGet(context) {
 
       const randomPrefix = spinWord(SPINTAX_PREFIX);
       const randomSuffix = spinWord(SPINTAX_SUFFIX);
-      const judulAsli = escapeXML(post.Judul);
+      
+      // Bersihkan Judul & Deskripsi dari karakter aneh
+      const judulAsli = cleanTextForXML(post.Judul);
       const judulBaru = `${randomPrefix} ${judulAsli} ${randomSuffix}`;
+      const deskripsiBersih = cleanTextForXML(post.Deskripsi).substring(0, 400); // Limit karakter deskripsi
 
       let combinedBacklinks = "";
 
@@ -210,26 +205,29 @@ export async function onRequestGet(context) {
          combinedBacklinks += `<br/>🔗 <strong>${extIntro}</strong> <a href="${extUrl}">External Source</a>`;
       }
 
+      // [FIX] Struktur CDATA yang aman
+      const safeDescription = `
+${deskripsiBersih}... 
+<br/><br/>
+👉 <strong>${randomPrefix} Link:</strong> <a href="${postUrl}">${randomSuffix}</a>
+<br/>
+${combinedBacklinks}
+      `;
+
       let proxiedImageUrl = "";
       if (post.Image) {
         const encodedImageUrl = encodeURIComponent(post.Image);
         proxiedImageUrl = `${SITE_URL}/image-proxy?url=${encodedImageUrl}`;
       }
 
-      xml += `
+      xmlBody += `
   <item>
-    <title>${judulBaru}</title>
-    <itunes:title>${judulBaru}</itunes:title>
+    <title>${escapeXML(judulBaru)}</title>
+    <itunes:title>${escapeXML(judulBaru)}</itunes:title>
     <link>${postUrl}</link>
     <guid isPermaLink="false">${escapeXML(post.KodeUnik)}</guid>
     
-    <description><![CDATA[
-      ${truncateAndClean(post.Deskripsi)}... 
-      <br/><br/>
-      👉 <strong>${randomPrefix} Link:</strong> <a href="${postUrl}">${randomSuffix}</a>
-      <br/>
-      ${combinedBacklinks}
-    ]]></description>
+    <description><![CDATA[${safeDescription}]]></description>
     
     ${post.tangal ? `<pubDate>${new Date(post.tangal).toUTCString()}</pubDate>` : ""}
     <enclosure url="${audioUrl}" type="audio/mpeg" length="1000000" />
@@ -243,14 +241,30 @@ export async function onRequestGet(context) {
 `;
     }); 
 
-    xml += `
+    // Footer
+    xmlBody += `
 </channel>
 </rss>`;
 
-    return new Response(xml, {
-      headers: { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "s-maxage=3600" }
+    // [FIX KRUSIAL] Hitung panjang byte XML untuk header Content-Length
+    const encoder = new TextEncoder();
+    const docBytes = encoder.encode(xmlBody);
+    const byteLength = docBytes.length;
+
+    return new Response(xmlBody, {
+      headers: { 
+        "Content-Type": "application/rss+xml; charset=utf-8",
+        "Content-Length": byteLength.toString(), // [FIX] Validator butuh ini
+        "Last-Modified": new Date().toUTCString(), // [FIX] Validator butuh ini
+        "Cache-Control": "s-maxage=60" // Cache pendek saat testing
+      },
     });
+
   } catch (e) {
-    return new Response(`Server error: ${e.message}`, { status: 500 });
+    const errorXml = `<?xml version="1.0" encoding="UTF-8" ?><rss version="2.0"><channel><title>Error</title><description>Server Error: ${e.message}</description></channel></rss>`;
+    return new Response(errorXml, { 
+        status: 500,
+        headers: { "Content-Type": "application/rss+xml" }
+    });
   }
 }
