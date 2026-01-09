@@ -1,4 +1,6 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
+// [FINAL REVISED VERSION] 
+// Fix: Encoding Error (No Emojis), Domain Leak, and Email Logic
 
 const SPINTAX_PREFIX = ["Download", "Get", "Read", "Free", "Grab", "Full", "Télécharger", "Lire", "Obtenir", "Gratuit", "Herunterladen", "Lesen", "Holen", "Gratis", "Descargar", "Leer", "Obtener", "Scarica", "Leggi", "Downloaden"];
 const SPINTAX_SUFFIX = ["PDF", "ePub", "Ebook", "Audiobook", "Full Version", "PDF Complet", "Version Complète", "Vollversion", "Libro Electrónico", "Versión Kompleta", "Versione Kompleta", "PDF 2025"];
@@ -11,12 +13,18 @@ function spinWord(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
 
+/**
+ * PEMBERSIHAN EKSTRIM:
+ * Menghapus emoji (👉, 📌, 🔗) dan karakter non-ASCII lainnya 
+ * yang sering menyebabkan 'Encoding Error' pada validator Podcast.
+ */
 function cleanTextForXML(str) {
   if (str === null || str === undefined) return "";
   const s = String(str);
-  let clean = s.replace(/<[^>]*>?/gm, ''); 
-  clean = clean.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ""); 
-  clean = clean.replace(/]]>/g, "]]&gt;"); 
+  let clean = s.replace(/<[^>]*>?/gm, ''); // Hapus HTML
+  // Hanya izinkan karakter ASCII standar (Keyboard), hapus emoji & simbol aneh
+  clean = clean.replace(/[^\x20-\x7E]/g, ""); 
+  clean = clean.replace(/]]>/g, "]]&gt;"); // Fix CDATA
   return clean.trim();
 }
 
@@ -32,13 +40,18 @@ function escapeXML(str) {
   });
 }
 
-// Logika Root Domain untuk dalbankeak.co.uk, dsb.
+/**
+ * LOGIKA ROOT DOMAIN:
+ * Memastikan dalbankeak.co.uk atau shopee-cod.my.id terdeteksi utuh untuk email.
+ */
 function getRootDomain(hostname) {
   const parts = hostname.split('.');
   const isThreePartTld = ["co.uk", "org.uk", "my.id", "me.uk", "ltd.uk"].some(tld => hostname.endsWith(tld));
   if (isThreePartTld) {
+    // Ambil 3 bagian terakhir (contoh: dalbankeak.co.uk)
     return parts.length >= 3 ? parts.slice(-3).join('.') : hostname;
   } else {
+    // Ambil 2 bagian terakhir (contoh: domain.com)
     return parts.length >= 2 ? parts.slice(-2).join('.') : hostname;
   }
 }
@@ -60,11 +73,16 @@ export async function onRequestGet(context) {
 
   try {
     const url = new URL(request.url);
+
+    // 1. DETEKSI DOMAIN (ANTI-LEAK)
     const forwardedHost = request.headers.get("X-Forwarded-Host");
     const currentHost = forwardedHost || url.host; 
     const SITE_URL = `https://${currentHost}`;
+    
+    // Deteksi Root Domain untuk Email (dalbankeak.co.uk, dsb)
     const ROOT_DOMAIN = getRootDomain(currentHost); 
 
+    // 2. PARSING URL PATH
     const pathSegments = params.path || [];
     const kategori = pathSegments[0] || "General";
     const emailUser = pathSegments[1] || "admin";
@@ -77,11 +95,13 @@ export async function onRequestGet(context) {
         if (segmentsToJoin.length > 0) rawExternalLink = segmentsToJoin.join("/");
     }
 
+    // Identitas Channel
     const DYNAMIC_EMAIL = `${emailUser}@${ROOT_DOMAIN}`;
     const dynamicAuthor = `${emailUser.toUpperCase()} Media`; 
     const feedTitle = `${capitalizeFirstLetter(emailUser)} ${spinWord(SPINTAX_TITLE_ADJ)} ${spinWord(SPINTAX_TITLE_NOUN)}`;
     const channelCoverUrl = "https://images.pexels.com/photos/415071/pexels-photo-415071.jpeg";
 
+    // 3. QUERY DATABASE
     const queryParams = [];
     let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
     if (kategori && kategori !== "General") {
@@ -93,24 +113,28 @@ export async function onRequestGet(context) {
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
 
+    // 4. GENERATE ITEMS XML
     let itemsXml = "";
     results.forEach((post, i) => {
       const episodeNumber = results.length - i; 
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
+
       const judulAsli = cleanTextForXML(post.Judul);
       const judulBaru = `${spinWord(SPINTAX_PREFIX)} ${judulAsli} ${spinWord(SPINTAX_SUFFIX)}`;
       
+      // Backlinks Tanpa Emoji
       let combinedBacklinks = "";
       if (pinterestUserRaw && !["0", "skip"].includes(pinterestUserRaw)) {
          const pinUrl = `https://www.pinterest.com/${pinterestUserRaw.replace(/\./g, '/')}/`;
-         combinedBacklinks += `<br/>📌 <strong>${spinWord(PINTEREST_INTRO)}</strong> <a href="${escapeXML(pinUrl)}">${pinterestUserRaw}</a>`;
+         combinedBacklinks += `<br/>Pinterest: <strong>${spinWord(PINTEREST_INTRO)}</strong> <a href="${escapeXML(pinUrl)}">${pinterestUserRaw}</a>`;
       }
       if (rawExternalLink) {
-         combinedBacklinks += `<br/>🔗 <strong>${spinWord(EXTERNAL_LINK_INTRO)}</strong> <a href="https://${rawExternalLink}">External Source</a>`;
+         combinedBacklinks += `<br/>Link: <strong>${spinWord(EXTERNAL_LINK_INTRO)}</strong> <a href="https://${rawExternalLink}">External Source</a>`;
       }
 
-      const safeDescription = `${cleanTextForXML(post.Deskripsi).substring(0, 400)}... <br/><br/>👉 <strong>Link:</strong> <a href="${escapeXML(postUrl)}">${spinWord(SPINTAX_SUFFIX)}</a><br/>${combinedBacklinks}`;
+      // Deskripsi Tanpa Emoji 👉
+      const safeDescription = `${cleanTextForXML(post.Deskripsi).substring(0, 400)}... <br/><br/>Download: <a href="${escapeXML(postUrl)}">${spinWord(SPINTAX_SUFFIX)}</a>${combinedBacklinks}`;
 
       itemsXml += `
     <item>
@@ -129,15 +153,16 @@ export async function onRequestGet(context) {
     </item>`;
     }); 
 
+    // 5. RAKIT XML FINAL (TANPA SPASI DI AWAL)
     const xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
   <title>${escapeXML(feedTitle)}</title>
   <link>${escapeXML(SITE_URL)}</link>
-  <description><![CDATA[Audio archive for ${cleanTextForXML(kategori)}.]]></description>
+  <description><![CDATA[Audio library for ${cleanTextForXML(kategori)}.]]></description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-  <atom:link href="${escapeXML(url.href)}" rel="self" type="application/rss+xml" />
+  <atom:link href="${escapeXML(SITE_URL + url.pathname)}" rel="self" type="application/rss+xml" />
   <itunes:author>${escapeXML(dynamicAuthor)}</itunes:author>
   <itunes:owner>
     <itunes:name>${escapeXML(dynamicAuthor)}</itunes:name>
