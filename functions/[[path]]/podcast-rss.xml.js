@@ -1,36 +1,29 @@
 // Hardcode: /functions/[[path]]/podcast-rss.xml.js
-// [FINAL SUPER VERSION] 
-// 1. Kategori (DB)
-// 2. Email (Verifikasi)
-// 3. Pinterest Backlink (Username)
-// 4. External Podcast Backlink (URL Path)
+// [FINAL VERSION] Support Pinterest Board (Use dot '.' as separator)
 
-// --- [SPINTAX CONFIGURATION] ---
 const SPINTAX_PREFIX = [
   "Download", "Get", "Read", "Free", "Grab", "Full", 
-  "Télécharger", "Lire", "Obtenir", "Gratuit", // FR
-  "Herunterladen", "Lesen", "Holen", "Gratis", // DE
-  "Descargar", "Leer", "Obtener", // ES
-  "Scarica", "Leggi", // IT
-  "Downloaden" // NL
+  "Télécharger", "Lire", "Obtenir", "Gratuit", 
+  "Herunterladen", "Lesen", "Holen", "Gratis", 
+  "Descargar", "Leer", "Obtener", 
+  "Scarica", "Leggi", 
+  "Downloaden" 
 ];
 
 const SPINTAX_SUFFIX = [
   "PDF", "ePub", "Ebook", "Audiobook", "Full Version", 
-  "PDF Complet", "Livre Numérique", "Version Complète", // FR
-  "Vollversion", "E-Book Deutsch", // DE
-  "Libro Electrónico", "Versión Completa", // ES
-  "Versione Completa", // IT
+  "PDF Complet", "Livre Numérique", "Version Complète", 
+  "Vollversion", "E-Book Deutsch", 
+  "Libro Electrónico", "Versión Completa", 
+  "Versione Completa", 
   "PDF 2025", "High Quality"
 ];
 
-// Kata pengantar untuk Link Podcast Lain
 const EXTERNAL_LINK_INTRO = [
   "Listen on partner:", "Also available on:", "Mirror link:", 
   "Alternative Source:", "Check out:", "Stream here:"
 ];
 
-// [NEW] Kata pengantar untuk Pinterest
 const PINTEREST_INTRO = [
   "Pin this:", "Saved on Pinterest:", "View our Board:", 
   "Follow on Pinterest:", "See collection:", "Visual guide:"
@@ -71,56 +64,44 @@ export async function onRequestGet(context) {
   const { env, request, params } = context;
   const db = env.DB;
 
-  // --- [SETTINGS] ---
   const DEFAULT_DURATION_SECONDS = 600; 
   const DEFAULT_SEASON = 1;
   const PODCAST_LOCKED = "no"; 
-  // --- [END SETTINGS] ---
 
   try {
     const url = new URL(request.url);
     const SITE_URL = url.origin;
     const ROOT_DOMAIN = getRootDomain(url.hostname); 
 
-    // --- 1. PARSING URL LANJUTAN ---
-    // Format: domain.com/[Kategori]/[User]/[PinterestUser]/[ExternalLink...]/podcast-rss.xml
+    // --- PARSING URL ---
     const pathSegments = params.path || [];
     
-    const kategori = pathSegments[0] || "General";       // Segmen 1
-    const emailUser = pathSegments[1] || "admin";        // Segmen 2
+    const kategori = pathSegments[0] || "General";
+    const emailUser = pathSegments[1] || "admin";
     
-    // [NEW] Segmen 3: Pinterest Username
-    // Jika user mengisi "0" atau "skip", maka tidak ada link pinterest
+    // Segmen 3: Pinterest (Username ATAU Username.Board)
     const pinterestUserRaw = pathSegments[2] || ""; 
     
-    // [NEW] Segmen 4 dst: External Link (Spotify, dll)
+    // Segmen 4 dst: External Link
     let rawExternalLink = "";
     if (pathSegments.length > 3) {
-        const segmentsToJoin = pathSegments.slice(3); // Ambil mulai dari segmen ke-4
-        
-        // Bersihkan nama file xml di ujung
+        const segmentsToJoin = pathSegments.slice(3);
         if (segmentsToJoin[segmentsToJoin.length - 1] === 'podcast-rss.xml') {
             segmentsToJoin.pop();
         }
-        
         if (segmentsToJoin.length > 0) {
             rawExternalLink = segmentsToJoin.join("/");
         }
     }
 
-    // --- 2. SETUP VARIABEL ---
     const DYNAMIC_EMAIL = `${emailUser}@${ROOT_DOMAIN}`;
     const dynamicAuthor = `${emailUser} Media`; 
     const feedTitle = `${escapeXML(kategori)} Audio Collection`;
-    
-    // Cover Podcast (Unik per Kategori)
     const channelCoverUrl = `https://picsum.photos/1400/1400?random=${encodeURIComponent(kategori)}`;
 
-    // --- 3. DATABASE QUERY ---
+    // Query DB
     const queryParams = [];
-    let query =
-      "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
-
+    let query = "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
     if (kategori && kategori !== "General") {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(kategori);
@@ -129,7 +110,6 @@ export async function onRequestGet(context) {
 
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
-
     const selfLink = url.href;
 
     // --- XML GENERATION ---
@@ -150,18 +130,14 @@ export async function onRequestGet(context) {
   <copyright>© ${new Date().getFullYear()} ${dynamicAuthor}</copyright>
 
   <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
-  
   <podcast:locked>${PODCAST_LOCKED}</podcast:locked>
   <podcast:guid>${crypto.randomUUID()}</podcast:guid>
-
   <itunes:author>${dynamicAuthor}</itunes:author>
   <itunes:type>episodic</itunes:type>
-  
   <itunes:owner>
     <itunes:name>${dynamicAuthor}</itunes:name>
     <itunes:email>${DYNAMIC_EMAIL}</itunes:email> 
   </itunes:owner>
-  
   <image>
      <url>${channelCoverUrl}</url>
      <title>${feedTitle}</title>
@@ -170,7 +146,6 @@ export async function onRequestGet(context) {
   <itunes:category text="Education" />
 `;
 
-    // Looping Items
     const totalResults = results.length;
     results.forEach((post, i) => {
       const episodeNumber = totalResults - i; 
@@ -182,23 +157,27 @@ export async function onRequestGet(context) {
       const judulAsli = escapeXML(post.Judul);
       const judulBaru = `${randomPrefix} ${judulAsli} ${randomSuffix}`;
 
-      // --- [BACKLINK GENERATOR] ---
       let combinedBacklinks = "";
 
-      // 1. Pinterest Logic
+      // [MODIFIED] Pinterest Logic (Dot '.' replaced with Slash '/')
       if (pinterestUserRaw && pinterestUserRaw !== "0" && pinterestUserRaw !== "skip") {
          const pinIntro = spinWord(PINTEREST_INTRO);
-         const pinUrl = `https://www.pinterest.com/${pinterestUserRaw}/`;
-         combinedBacklinks += `<br/>📌 <strong>${pinIntro}</strong> <a href="${pinUrl}">${pinterestUserRaw}</a>`;
+         
+         // Ganti titik (.) jadi slash (/) agar support board
+         const cleanPinPath = pinterestUserRaw.replace(/\./g, '/');
+         const pinUrl = `https://www.pinterest.com/${cleanPinPath}/`;
+         
+         // Tampilan teks link tetap rapi (titik diganti spasi atau biarkan)
+         const displayText = pinterestUserRaw.replace(/\./g, ' / ');
+
+         combinedBacklinks += `<br/>📌 <strong>${pinIntro}</strong> <a href="${pinUrl}">${displayText}</a>`;
       }
 
-      // 2. External Podcast Logic
       if (rawExternalLink) {
          const extIntro = spinWord(EXTERNAL_LINK_INTRO);
          const extUrl = `https://${rawExternalLink}`;
          combinedBacklinks += `<br/>🔗 <strong>${extIntro}</strong> <a href="${extUrl}">External Source</a>`;
       }
-      // ----------------------------
 
       let proxiedImageUrl = "";
       if (post.Image) {
@@ -238,10 +217,7 @@ export async function onRequestGet(context) {
 </rss>`;
 
     return new Response(xml, {
-      headers: { 
-        "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "s-maxage=3600",
-      },
+      headers: { "Content-Type": "application/rss+xml; charset=utf-8", "Cache-Control": "s-maxage=3600" }
     });
   } catch (e) {
     return new Response(`Server error: ${e.message}`, { status: 500 });
