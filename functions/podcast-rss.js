@@ -1,37 +1,54 @@
 // Hardcode: /functions/podcast-rss.js
-// [FINAL v2] SEO Farm: Auto Cover + Dual Backlink + TITLE SPINTAX (Anti-Monoton)
+// [FINAL v4] SEO Farm: Title Spintax + CPA Header Spintax + NATURAL BACKLINKING (Anti-Footprint)
 
 const BLOG_TITLE_DEFAULT = "Podcast Series";
 const DEFAULT_DESCRIPTION = "Exclusive audio content sharing insights, stories, and educational materials.";
 
-// --- [BANK KATA SPINTAX] ---
-// Kata-kata ini akan dipilih secara ACAK untuk setiap episode
-// agar feed terlihat natural dan tidak robotik.
-
+// --- [BANK KATA 1: JUDUL EPISODE] ---
 const SPIN_PREFIXES = [
-  // English
-  "Download", "Get", "Grab", "Read", "Access", "Free", "Full",
-  // German
-  "Gratis", "Lies", "Holen",
-  // French
-  "Telecharger", "Lire", "Obtenir",
-  // Spanish/Portuguese
-  "Descargar", "Leer", "Baixar", "Obtener",
-  // Simbol penarik perhatian
+  "Download", "Get", "Grab", "Read", "Access", "Free", "Full", 
+  "Gratis", "Lies", "Holen", // German
+  "Telecharger", "Lire", "Obtenir", // French
+  "Descargar", "Leer", "Baixar", "Obtener", // Spanish/Port
   "👉", "🔥", "✅", "⚡", "[PDF]", "(Ebook)"
 ];
 
 const SPIN_SUFFIXES = [
-  // English
   "PDF", "Ebook", "Full Version", "Direct Link", "Now", "Free", "Online",
-  // German
   "Kostenlos", "Herunterladen", "Buch",
-  // French
   "Gratuit", "Complet",
-  // Spanish/Portuguese
   "Gratis", "Completo", "Digital", "Ahora",
-  // Simbol/Tahun
   "(2024)", "[Update]", "2025", "✨", "⬇️"
+];
+
+// --- [BANK KATA 2: CPA HEADER (LINK DOWNLOAD)] ---
+const SPIN_CPA_HEADERS = [
+  "📥 Download Here:",
+  "🚀 Fast Download Link:",
+  "✅ Official Source:",
+  "🔥 Get Full Book:",
+  "⚡ Instant Access:",
+  "🌐 Mirror Link (Secure):",
+  "📚 Read Online / Download:",
+  "👉 Direct Link:",
+  "⬇️ Link Alternatif:",
+  "📥 Telecharger Ici:",
+  "🚀 Descargar Aquí:",
+  "✅ Download Starten:",
+  "🔐 Secure File Access:"
+];
+
+// --- [BANK KATA 3: SOCIAL/PINTEREST CTA (BARU)] ---
+// Variasi kata ajakan untuk link Pinterest agar tidak monoton
+const SPIN_SOCIAL_CTAS = [
+  "Find us on Pinterest:",
+  "Follow our Board:",
+  "See more ideas on Pinterest:",
+  "Visit our Profile:",
+  "More inspiration here:",
+  "Follow for updates:",
+  "Lihat koleksi di Pinterest:",
+  "Follow kami di Pinterest:"
 ];
 
 // --- HELPER FUNCTIONS ---
@@ -68,7 +85,7 @@ function getHashFromTitle(str) {
   return Math.abs(hash);
 }
 
-// Fungsi Helper Baru: Mengambil elemen acak dari Array
+// Fungsi Helper: Mengambil elemen acak dari Array
 function getRandomWord(array) {
   return array[Math.floor(Math.random() * array.length)];
 }
@@ -92,19 +109,15 @@ export async function onRequestGet(context) {
   const AUTO_IMAGE = `https://picsum.photos/1400/1400?random=${imageSeed}`;
   const PODCAST_IMAGE = url.searchParams.get("image") || AUTO_IMAGE;
 
-  // Backlink Logic
-  const TARGET_LINK = url.searchParams.get("target") || SITE_URL;
-  const PROMO_LINK = url.searchParams.get("promo") || "";
-  const PROMO_TEXT = url.searchParams.get("promoText") || "Listen to our partner podcast";
+  // Backlink & CPA Logic
+  const TARGET_LINK = url.searchParams.get("target") || SITE_URL; // Pinterest
+  const PROMO_LINK = url.searchParams.get("promo") || ""; // CPA/Affiliate
+  const PROMO_TEXT = url.searchParams.get("promoText") || "Download Full PDF Now";
 
   try {
     // Routing Logic
-    // [PENTING] Kita tetap ambil params path, TAPI...
-    // Jika path kosong, kita akan pakai SPINTAX otomatis nanti di bawah.
     const pathSegments = params.path || [];
     const kategoriFilter = pathSegments[0] || ""; 
-    
-    // Kita simpan manual input (jika ada)
     const manualJudulAwal = pathSegments[1] || ""; 
     const manualJudulAkhir = pathSegments[2] || "";
 
@@ -136,7 +149,7 @@ export async function onRequestGet(context) {
   <description><![CDATA[${DEFAULT_DESCRIPTION} <br> Visit: <a href="${escapeXML(TARGET_LINK)}">${escapeXML(TARGET_LINK)}</a>]]></description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-  <generator>Flowork SEO Gen</generator>
+  <generator>Flowork CPA Gen</generator>
   <copyright>© ${new Date().getFullYear()} ${escapeXML(PODCAST_AUTHOR)}</copyright>
 
   <atom:link href="${escapeXML(selfLink)}" rel="self" type="application/rss+xml" />
@@ -161,31 +174,37 @@ export async function onRequestGet(context) {
     results.forEach((post, i) => {
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
       
-      // --- LOGIKA SPINTAX TITLE (AUTO RANDOM) ---
-      // 1. Ambil Judul Asli Buku
+      // 1. SPINTAX TITLE
       let baseTitle = post.Judul;
-
-      // 2. Tentukan Prefix (Awalan)
-      // Jika user mengisi manual di URL, pakai manual. Jika kosong, PILIH ACAK.
       let prefix = manualJudulAwal ? manualJudulAwal : getRandomWord(SPIN_PREFIXES);
-      
-      // 3. Tentukan Suffix (Akhiran)
-      // Sama, jika manual kosong, PILIH ACAK.
       let suffix = manualJudulAkhir ? manualJudulAkhir : getRandomWord(SPIN_SUFFIXES);
-
-      // 4. Gabungkan
-      // Format: "Download [Judul Buku] PDF" atau "Gratis [Judul Buku] Now"
       let judulEpisode = `${escapeXML(prefix)} ${escapeXML(baseTitle)} ${escapeXML(suffix)}`;
-      // ------------------------------------------
 
+      // 2. SPINTAX HEADERS
+      let cpaHeader = getRandomWord(SPIN_CPA_HEADERS);
+      let socialCta = getRandomWord(SPIN_SOCIAL_CTAS);
+
+      // --- LOGIKA NATURAL BACKLINK (PENTING) ---
       let richDescription = post.Deskripsi || "";
       richDescription += `<br/><br/>-----------------<br/>`;
-      richDescription += `<strong>Find us on Pinterest:</strong> <a href="${escapeXML(TARGET_LINK)}">${escapeXML(PODCAST_AUTHOR)}</a>`;
 
+      // LOGIKA 1: Link Pinterest (TARGET_LINK)
+      // Hanya muncul di 80% episode (Math.random > 0.2). 
+      // Sisa 20% episode tidak ada link Pinterest (agar terlihat natural).
+      if (Math.random() > 0.2) {
+         // Variasi Anchor Text: Kadang nama Author, kadang "Visit Profile"
+         const anchorText = (Math.random() > 0.5) ? PODCAST_AUTHOR : "Visit Profile";
+         
+         richDescription += `<strong>${socialCta}</strong> <a href="${escapeXML(TARGET_LINK)}">${escapeXML(anchorText)}</a><br/>`;
+      }
+
+      // LOGIKA 2: Link CPA / Affiliate (PROMO_LINK)
+      // Selalu muncul (karena ini duitnya), tapi headernya ganti-ganti
       if (PROMO_LINK) {
-        richDescription += `<br/><br/><strong>Don't miss our partner show:</strong> <br/>`;
+        richDescription += `<br/><strong>${cpaHeader}</strong> <br/>`;
         richDescription += `<a href="${escapeXML(PROMO_LINK)}">👉 ${escapeXML(PROMO_TEXT)}</a>`;
       }
+      // ---------------------------------------
 
       xml += `
   <item>
@@ -211,7 +230,7 @@ export async function onRequestGet(context) {
     return new Response(xml, {
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "no-cache", // Jangan cache biar spin-nya selalu fresh kalau direfresh
+        "Cache-Control": "no-cache", 
       },
     });
   } catch (e) {
