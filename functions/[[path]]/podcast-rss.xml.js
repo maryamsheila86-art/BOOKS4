@@ -1,11 +1,23 @@
 // --- [CONFIG] ---
-const MAIN_DOMAIN = "domainutama.com"; // Ganti dengan domain utama Anda untuk catch-all email
+const MAIN_DOMAIN = "domainutama.com"; 
+const BLOG_TITLE = "EBOOK LIBRARY";
+const BLOG_DESCRIPTION = "Download Free PDF Ebooks Best Seller";
 
-const BLOG_TITLE = "PREMIUM AUDIO LIBRARY";
-const BLOG_DESCRIPTION = "High Quality Audiobook & Ebook Collection - 2026 Edition";
+// --- SPINTAX ASLI (RESTORED DARI RSS.XML.JS) ---
+const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
+{PDF|Epub|Mobi|Audiobook|Kindle|Book} \
+{Online|Directly|Instant|Fast}`;
+
+const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} \
+{No Sign Up|Direct Link|High Speed|Free Account} \
+{Best Seller|Trending|Viral|Must Read}`;
+
+const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} \
+{Free|Kostenlos|Gratuit|Gratis} \
+{PDF|Ebook|Livre|Libro}`;
 
 /**
- * Fungsi Escape XML ketat untuk mencegah error "Corrupted/Broken Tags".
+ * Fungsi Escape XML ketat agar tidak FATAL error.
  */
 function escapeXML(str) {
   if (!str) return "";
@@ -15,6 +27,11 @@ function escapeXML(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+function cleanCDATA(str) {
+  if (!str) return "";
+  return str.replace(/]]>/g, "]]&gt;");
 }
 
 function stringToHash(string) {
@@ -41,16 +58,14 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
   const SITE_URL = url.origin;
 
-  // Parsing Path dinamis
   const path = params.path || [];
   if (path.length < 2) {
     return new Response("Invalid URL Structure", { status: 400 });
   }
 
-  const kategori = path[0]; // ebook1
-  const username = path[1]; // miller
+  const kategori = path[0];
+  const username = path[1];
   
-  // Mencari domain platform podcast
   let podcastStartIndex = path.findIndex((seg, idx) => idx > 1 && seg.includes('.'));
   if (podcastStartIndex === -1) podcastStartIndex = path.length;
 
@@ -62,13 +77,12 @@ export async function onRequestGet(context) {
     const query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now') ORDER BY tangal DESC LIMIT 30";
     const { results } = await db.prepare(query).all();
 
-    // Gambar Utama (Channel Cover) lewat Proxy
     let channelCoverUrl = `${SITE_URL}/default-cover.jpg`; 
     if (results.length > 0 && results[0].Image) {
       channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(results[0].Image)}`;
     }
 
-    // --- GENERATE XML (FULL COMPATIBILITY) ---
+    // --- GENERATE XML (IKUTI STRUKTUR FIRSTORY) ---
     let xml = `<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0" 
     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
@@ -95,7 +109,7 @@ export async function onRequestGet(context) {
   <itunes:image href="${escapeXML(channelCoverUrl)}" />
   
   <itunes:category text="Arts">
-    <itunes:category text="Books" />
+    <itunes:category text="Books"/>
   </itunes:category>
   
   <itunes:explicit>false</itunes:explicit>
@@ -104,24 +118,26 @@ export async function onRequestGet(context) {
 
     for (const post of results) {
       const seed = post.KodeUnik;
-      const spinPre = `{Download|Free|Get|Stream|Listen}`;
-      const spinSuf = `{Full Version|Audiobook|Official}`;
-      const judulBaru = `${spinTextStable(spinPre, seed)} ${post.Judul} ${spinTextStable(spinSuf, seed)}`;
+      
+      // LOGIKA DETERMINISTIK BAHASA (Sama seperti rss.xml.js)
+      const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
+      let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
+      let akhiran = isMultiLang ? spinTextStable("{2025|2026|Full}", seed + "suffix") : spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
+
+      const judulBaru = `${awalan} ${post.Judul} ${akhiran}`;
       
       const itemImage = post.Image ? `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}` : channelCoverUrl;
       const audioUrl = `${SITE_URL}/functions/podcast-audio/${post.KodeUnik}.mp3`;
-      const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
 
       xml += `
   <item>
     <title>${escapeXML(judulBaru)}</title>
     <itunes:title>${escapeXML(judulBaru)}</itunes:title>
     <itunes:author>${escapeXML(username)}</itunes:author>
-    <description><![CDATA[${post.Deskripsi || "Listen to this audio version."}<br/><br/>🔗 Pinterest: https://pinterest.com/${pinterestPath}<br/>🎙️ Follow: https://${podcastPath}]]></description>
-    <content:encoded><![CDATA[${post.Deskripsi || ""}<br/><br/><b>Backlink:</b> https://pinterest.com/${pinterestPath}]]></content:encoded>
+    <description><![CDATA[${cleanCDATA(post.Deskripsi) || "Listen to this audio version."}<br/><br/>🔗 Pinterest: https://pinterest.com/${pinterestPath}<br/>🎙️ Follow: https://${podcastPath}]]></description>
     <pubDate>${new Date(post.tangal).toUTCString()}</pubDate>
     <guid isPermaLink="false">${escapeXML(post.KodeUnik)}</guid>
-    <link>${postUrl}</link>
+    <link>${SITE_URL}/post/${post.KodeUnik}</link>
     <enclosure url="${escapeXML(audioUrl)}" length="1024000" type="audio/mpeg" />
     <itunes:image href="${escapeXML(itemImage)}" />
     <itunes:duration>00:10:00</itunes:duration>
