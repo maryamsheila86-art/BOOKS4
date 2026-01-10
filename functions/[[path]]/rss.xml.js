@@ -1,31 +1,30 @@
-// Hardcode: /functions/podcast/[[path]].js
-// [FINAL v7] SUPPORT .XML EXTENSION + Pinterest Backlink + CPA Spintax
+// Hardcode: /functions/[[path]]/rss.xml.js
 
-const BLOG_TITLE_DEFAULT = "Podcast Series";
-const DEFAULT_DESCRIPTION = "Exclusive audio content sharing insights, stories, and educational materials.";
+const BLOG_TITLE = "EBOOK LIBRARY";
+const BLOG_DESCRIPTION = "Download Free PDF Ebooks Best Seller";
 
-// --- [BANK KATA SPINTAX] ---
-const SPIN_PREFIXES = ["Download", "Get", "Grab", "Read", "Access", "Free", "Full", "Gratis", "Telecharger", "Descargar", "👉", "🔥"];
-const SPIN_SUFFIXES = ["PDF", "Ebook", "Full Version", "Direct Link", "Now", "Free", "Kostenlos", "Gratuit", "(2025)", "✨", "⬇️"];
-const SPIN_CPA_HEADERS = [
-  "📥 Download Here:", "🚀 Fast Download Link:", "✅ Official Source:", "🔥 Get Full Book:", 
-  "⚡ Instant Access:", "👉 Direct Link:", "⬇️ Link Alternatif:", "🔐 Secure File Access:"
-];
-const SPIN_SOCIAL_CTAS = [
-  "Find us on Pinterest:", "Follow our Board:", "Visit our Profile:", "More inspiration here:", "Follow for updates:"
-];
+// --- CONFIG: SPINTAX (CPA TARGET: TIER 1 COUNTRIES) ---
+// Target: English, German, French, Spanish, Italian.
 
-// --- HELPER FUNCTIONS ---
-function truncateAndClean(str, length = 250) {
-  if (!str) return "";
-  const cleanStr = str.replace(/<[^>]*>?/gm, ''); 
-  const truncated = cleanStr.substring(0, length);
-  return cleanStr.length > length ? truncated + "..." : truncated;
-}
+// Prefix Variations
+const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
+{PDF|Epub|Mobi|Audiobook|Kindle|Book} \
+{Online|Directly|Instant|Fast}`;
+
+const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} \
+{No Sign Up|Direct Link|High Speed|Free Account} \
+{Best Seller|Trending|Viral|Must Read}`;
+
+// Multi-language Variations
+const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} \
+{Free|Kostenlos|Gratuit|Gratis} \
+{PDF|Ebook|Livre|Libro}`;
+
+// --- END CONFIG ---
 
 function escapeXML(str) {
   if (!str) return "";
-  return str.replace(/[<>&"']/g, match => {
+  return str.replace(/[<>&"']/g, function (match) {
     switch (match) {
       case "<": return "&lt;";
       case ">": return "&gt;";
@@ -37,169 +36,135 @@ function escapeXML(str) {
   });
 }
 
-function getHashFromTitle(str) {
+/**
+ * Mengubah string menjadi angka integer (Hash).
+ * Gunanya agar "KodeUnik" buku bisa dijadikan angka untuk memilih spintax.
+ */
+function stringToHash(string) {
   let hash = 0;
-  if (!str) return 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
+  if (string.length === 0) return hash;
+  for (let i = 0; i < string.length; i++) {
+    const char = string.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash = hash & hash; // Convert to 32bit integer
   }
   return Math.abs(hash);
 }
 
-function getRandomWord(array) {
-  return array[Math.floor(Math.random() * array.length)];
+/**
+ * Spintax Deterministik.
+ * Pilihan kata TIDAK random murni, tapi bergantung pada "seed" (ID Buku).
+ * Jadi satu buku akan selalu punya judul yang sama selamanya.
+ */
+function spinTextStable(text, seedStr) {
+  return text.replace(/\{([^{}]+)\}/g, function (match, content) {
+    const choices = content.split("|");
+    
+    // Kita gabungkan seedStr (ID Buku) dengan content spintax itu sendiri
+    // Agar pemilihan kata pertama dan kata kedua tidak selalu sinkron (lebih variatif)
+    const uniqueHash = stringToHash(seedStr + content);
+    
+    const index = uniqueHash % choices.length;
+    return choices[index];
+  });
 }
-
-// --- MAIN HANDLER ---
 
 export async function onRequestGet(context) {
   const { env, request, params } = context;
   const db = env.DB;
-  const url = new URL(request.url);
-  const SITE_URL = url.origin;
-
-  // ==========================================
-  // 1. TANGKAP DATA URL & BERSIHKAN .XML
-  // ==========================================
-  
-  // Ambil array path
-  let pathSegments = params.path || [];
-
-  // [FITUR BARU] Cek apakah segmen terakhir adalah nama file .xml (misal: podcast-rss.xml)
-  // Jika ya, kita BUANG agar tidak masuk ke judul.
-  if (pathSegments.length > 0) {
-    const lastSegment = pathSegments[pathSegments.length - 1].toLowerCase();
-    if (lastSegment.includes(".xml") || lastSegment.includes(".rss")) {
-        pathSegments.pop(); // Hapus elemen terakhir
-    }
-  }
-
-  // Setelah .xml dibuang, sisanya adalah Kategori dan Judul
-  const URL_CATEGORY = pathSegments[0] ? decodeURIComponent(pathSegments[0]) : "General";
-  const URL_TITLE_START = pathSegments[1] ? decodeURIComponent(pathSegments[1]) : "";
-  const URL_TITLE_END = pathSegments[2] ? decodeURIComponent(pathSegments[2]) : "";
-
-  // Gabungkan jadi Judul Utama
-  let FINAL_PODCAST_TITLE = BLOG_TITLE_DEFAULT;
-  if (URL_TITLE_START || URL_TITLE_END) {
-      FINAL_PODCAST_TITLE = `${URL_TITLE_START} ${URL_TITLE_END}`.trim();
-  } else if (URL_CATEGORY !== "General") {
-      FINAL_PODCAST_TITLE = `${URL_CATEGORY} Series`;
-  }
-
-  // ==========================================
-  // 2. SETTING TEKNIS (QUERY PARAM)
-  // ==========================================
-
-  const PODCAST_OWNER_EMAIL = url.searchParams.get("email") || "admin@flowork.cloud";
-  const PODCAST_AUTHOR = url.searchParams.get("author") || "Creator"; 
-  const TARGET_LINK = url.searchParams.get("target") || SITE_URL; 
-  const PROMO_LINK = url.searchParams.get("promo") || ""; 
-  const PROMO_TEXT = url.searchParams.get("promoText") || "Download Full PDF Now";
-
-  // Auto Image
-  const imageSeed = getHashFromTitle(FINAL_PODCAST_TITLE);
-  const AUTO_IMAGE = `https://picsum.photos/1400/1400?random=${imageSeed}`;
-  const PODCAST_IMAGE = url.searchParams.get("image") || AUTO_IMAGE;
 
   try {
+    const url = new URL(request.url);
+    const SITE_URL = url.origin;
+
+    const pathSegments = params.path || [];
+    const kategori = pathSegments[0] || null;
+
     const queryParams = [];
-    let query = "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
+    let query =
+      "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
 
-    if (URL_CATEGORY && URL_CATEGORY !== "General") {
+    if (kategori) {
       query += " AND UPPER(Kategori) = UPPER(?)";
-      queryParams.push(URL_CATEGORY);
+      queryParams.push(kategori);
     }
+    
+    // PENTING: Jangan pakai RANDOM() di SQL jika ingin urutan stabil untuk RSS Reader
     query += " ORDER BY tangal DESC LIMIT 50"; 
-
+    
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
 
-    const selfLink = url.href; 
+    const feedTitle = kategori
+      ? `${escapeXML(BLOG_TITLE)} - ${escapeXML(kategori)} Collection`
+      : escapeXML(BLOG_TITLE);
+    const selfLink = url.href;
 
-    // XML Header
     let xml = `<?xml version="1.0" encoding="UTF-8" ?>
-<rss version="2.0"
-  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
-  xmlns:podcast="https://podcastindex.org/namespace/1.0"
-  xmlns:content="http://purl.org/rss/1.0/modules/content/"
-  xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
-  <title>${escapeXML(FINAL_PODCAST_TITLE)}</title>
-  <link>${escapeXML(TARGET_LINK)}</link>
-  <description><![CDATA[${DEFAULT_DESCRIPTION} <br> Visit: <a href="${escapeXML(TARGET_LINK)}">${escapeXML(TARGET_LINK)}</a>]]></description>
+  <title>${feedTitle}</title>
+  <link>${SITE_URL}</link>
+  <description>${escapeXML(BLOG_DESCRIPTION)}</description>
   <language>en-us</language>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-  <generator>Flowork XML Gen</generator>
-  <copyright>© ${new Date().getFullYear()} ${escapeXML(PODCAST_AUTHOR)}</copyright>
-
-  <atom:link href="${escapeXML(selfLink)}" rel="self" type="application/rss+xml" />
-
-  <itunes:author>${escapeXML(PODCAST_AUTHOR)}</itunes:author>
-  <itunes:type>episodic</itunes:type>
-  <itunes:owner>
-    <itunes:name>${escapeXML(PODCAST_AUTHOR)}</itunes:name>
-    <itunes:email>${escapeXML(PODCAST_OWNER_EMAIL)}</itunes:email>
-  </itunes:owner>
-
-  <image>
-     <url>${escapeXML(PODCAST_IMAGE)}</url>
-     <title>${escapeXML(FINAL_PODCAST_TITLE)}</title>
-     <link>${escapeXML(TARGET_LINK)}</link>
-  </image>
-  <itunes:category text="${escapeXML(URL_CATEGORY)}" />
+  <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
 `;
 
-    // Looping Items
-    const totalResults = results.length;
-    results.forEach((post, i) => {
-      const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
-      
-      // SPINTAX TITLE
-      let prefix = URL_TITLE_START ? URL_TITLE_START : getRandomWord(SPIN_PREFIXES);
-      let suffix = URL_TITLE_END ? URL_TITLE_END : getRandomWord(SPIN_SUFFIXES);
-      let baseTitle = post.Judul;
-      
-      let judulEpisode = `${escapeXML(prefix)} ${escapeXML(baseTitle)} ${escapeXML(suffix)}`;
+    for (const post of results) {
+      const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
+      const judulAsli = escapeXML(post.Judul);
+      const seed = post.KodeUnik || post.Judul; // Kunci unik per buku
 
-      // SPINTAX DESCRIPTION & BACKLINK
-      let cpaHeader = getRandomWord(SPIN_CPA_HEADERS);
-      let socialCta = getRandomWord(SPIN_SOCIAL_CTAS);
-      let richDescription = post.Deskripsi || "";
-      
-      richDescription += `<br/><br/>-----------------<br/>`;
+      // --- LOGIKA DETERMINISTIK ---
+      // Gunakan hash dari ID buku untuk menentukan apakah dia pakai Multi-Lang atau Inggris
+      // % 100 < 50 artinya 50% peluang, tapi tetap (tidak berubah-ubah untuk buku tsb)
+      const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
 
-      // Backlink Pinterest (80% Chance)
-      if (Math.random() > 0.2) {
-         const anchorText = (Math.random() > 0.5) ? PODCAST_AUTHOR : "Visit Profile";
-         richDescription += `<strong>${socialCta}</strong> <a href="${escapeXML(TARGET_LINK)}">${escapeXML(anchorText)}</a><br/>`;
+      let awalan = "";
+      let akhiran = "";
+
+      if (isMultiLang) {
+        awalan = spinTextStable(MULTI_LANG_PREFIX, seed + "prefix");
+        akhiran = spinTextStable("{2025|2026|Full}", seed + "suffix"); 
+      } else {
+        awalan = spinTextStable(SPINTAX_PREFIX, seed + "prefix");
+        akhiran = spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
       }
 
-      // Link CPA
-      if (PROMO_LINK) {
-        richDescription += `<br/><strong>${cpaHeader}</strong> <br/>`;
-        richDescription += `<a href="${escapeXML(PROMO_LINK)}">👉 ${escapeXML(PROMO_TEXT)}</a>`;
+      const judulBaru = `${awalan} ${judulAsli} ${akhiran}`;
+      const ctaDesc = spinTextStable("{Click to Download|Get it Now|Read Online}", seed + "cta");
+
+      let proxiedImageUrl = "";
+      if (post.Image) {
+        const encodedImageUrl = encodeURIComponent(post.Image);
+        proxiedImageUrl = `${SITE_URL}/image-proxy?url=${encodedImageUrl}`;
       }
 
       xml += `
   <item>
-    <title>${judulEpisode}</title>
-    <itunes:title>${judulEpisode}</itunes:title>
-    <link>${escapeXML(TARGET_LINK)}</link>
-    <guid isPermaLink="false">${escapeXML(post.KodeUnik)}</guid>
-    <description><![CDATA[${truncateAndClean(post.Deskripsi)}]]></description>
-    <content:encoded><![CDATA[${richDescription}]]></content:encoded>
-    <enclosure url="${audioUrl}" type="audio/mpeg" length="1000000" />
-    <itunes:duration>600</itunes:duration>
-    <itunes:season>1</itunes:season>
-    <itunes:episode>${totalResults - i}</itunes:episode>
-    <itunes:image href="${escapeXML(PODCAST_IMAGE)}" />
-  </item>
+    <title>${escapeXML(judulBaru)}</title> 
+    <link>${postUrl}</link>
+    <guid isPermaLink="true">${postUrl}</guid>
+    <g:id>${escapeXML(post.KodeUnik)}</g:id>
+    <description><![CDATA[
+      ${post.Deskripsi || "Summary not available."}<br/><br/> 
+      <strong>${ctaDesc}</strong>: <a href="${postUrl}">${escapeXML(judulBaru)}</a>
+    ]]></description>
+    ${
+      proxiedImageUrl
+        ? `<g:image_link>${escapeXML(proxiedImageUrl)}</g:image_link>`
+        : ""
+    }
+    <g:availability>in stock</g:availability>
+    ${
+      post.tangal
+        ? `<pubDate>${new Date(post.tangal).toUTCString()}</pubDate>`
+        : ""
+    }
+    </item>
 `;
-    });
-
+    }
     xml += `
 </channel>
 </rss>`;
@@ -207,10 +172,14 @@ export async function onRequestGet(context) {
     return new Response(xml, {
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "s-maxage=600",
+        // Cache boleh diaktifkan kembali karena konten sudah stabil (konsisten)
+        "Cache-Control": "s-maxage=3600", 
       },
     });
   } catch (e) {
-    return new Response(`Error: ${e.message}`, { status: 500 });
+    return new Response(`Server error: ${e.message}`, {
+      status: 500,
+      headers: { "Content-Type": "text/plain" },
+    });
   }
 }
