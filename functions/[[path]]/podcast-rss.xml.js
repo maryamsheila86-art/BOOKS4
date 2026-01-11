@@ -4,7 +4,7 @@ const CONFIG = {
   title: "Audiobook Collection",
   description: "Listen to the best audiobooks and reviews.", 
   author: "Ebook Library",
-  email: "admin@flowork.cloud", 
+  email: "coro@dalbankeak.co.uk", 
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
@@ -71,7 +71,7 @@ export async function onRequestGet(context) {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(filterKategori);
     }
-    query += " ORDER BY tangal DESC LIMIT 1"; 
+    query += " ORDER BY tangal DESC LIMIT 200"; 
     
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
