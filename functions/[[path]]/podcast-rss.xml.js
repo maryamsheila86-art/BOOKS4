@@ -1,18 +1,15 @@
 // Hardcode: /functions/[[path]]/podcast.xml.js
 
-// --- CONFIG ---
 const CONFIG = {
   title: "Audiobook Collection",
-  // Deskripsi default jika db kosong
   description: "Listen to the best audiobooks and reviews.", 
   author: "Ebook Library",
   email: "admin@flowork.cloud", 
-  language: "en-us", // Firstory pakai 'en', tapi 'en-us' juga ok
+  language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  // GANTI INI dengan URL gambar 1400x1400 valid
+  // Image wajib valid (JPG/PNG, min 1400x1400)
   image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
-  siteUrl: "" 
 };
 
 // --- SPINTAX ---
@@ -21,25 +18,20 @@ const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:
 {Guide|Book|Novel|Material}`;
 const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
 
-// --- HELPER: CLEANER & CDATA WRAPPER ---
-// Ini kunci agar tidak error FATAL
+// --- HELPER: CLEANER & ENCODER ---
 function cdata(str) {
   if (!str) return "";
-  // 1. Hapus Control Characters (ASCII 0-31) yang bikin XML rusak
-  // Kecuali Tab(\x09), LF(\x0A), CR(\x0D)
+  // Hapus karakter kontrol ASCII yang merusak XML (Vertical tab, null, dll)
   let clean = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  
-  // 2. Bungkus dengan CDATA agar karakter aneh (&, <, >) dianggap teks aman
-  // Ganti penutup CDATA jika ada di dalam teks
+  // Escape CDATA closing tags
   clean = clean.replace(/]]>/g, "]]]]><![CDATA[>");
   return `<![CDATA[${clean}]]>`;
 }
 
-// Fungsi khusus untuk description (harus plain text, no HTML)
 function stripTags(str) {
   if (!str) return "";
-  let text = str.replace(/<[^>]*>?/gm, " "); // Hapus tag HTML
-  text = text.replace(/\s+/g, " ").trim(); // Rapikan spasi
+  let text = str.replace(/<[^>]*>?/gm, " "); 
+  text = text.replace(/\s+/g, " ").trim();
   return text;
 }
 
@@ -67,37 +59,31 @@ export async function onRequestGet(context) {
 
   try {
     const url = new URL(request.url);
-
-    // Deteksi Host (Router Support)
     const forwardedHost = request.headers.get("X-Forwarded-Host");
     const SITE_URL = forwardedHost ? `${url.protocol}//${forwardedHost}` : url.origin;
-    
-    // Setup Self Link
     const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // Filter Kategori
+    // Query DB
     const pathSegments = params.path || [];
     const filterKategori = pathSegments[0] || null;
-
-    let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
     const queryParams = [];
-
+    
+    let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
     if (filterKategori) {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(filterKategori);
     }
-    
     query += " ORDER BY tangal DESC LIMIT 50"; 
+    
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
 
-    const feedTitle = filterKategori 
-      ? `${CONFIG.title} - ${filterKategori}` 
-      : CONFIG.title;
+    const feedTitle = filterKategori ? `${CONFIG.title} - ${filterKategori}` : CONFIG.title;
+    const lastBuildDate = new Date().toUTCString();
 
-    // --- XML HEADER (COPY PASTE DARI FIRSTORY) ---
-    // Perhatikan namespace 'spotify' dan 'podcast' yang ditambahkan
-    let xml = `<?xml version="1.0" encoding="UTF-8"?>
+    // --- XML CONSTRUCTION ---
+    // Kita bangun string XML-nya dulu
+    let xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
   xmlns:content="http://purl.org/rss/1.0/modules/content/"
@@ -110,13 +96,14 @@ export async function onRequestGet(context) {
     <description>${cdata(CONFIG.description)}</description>
     <language>${CONFIG.language}</language>
     <copyright>${cdata(CONFIG.author)}</copyright>
-    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-    <generator>Firstory</generator> <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
-    
+    <lastBuildDate>${lastBuildDate}</lastBuildDate>
+    <generator>Firstory</generator>
+    <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
     <itunes:summary>${cdata(CONFIG.description)}</itunes:summary>
     <itunes:author>${cdata(CONFIG.author)}</itunes:author>
     <itunes:type>episodic</itunes:type>
-    <itunes:explicit>no</itunes:explicit> <itunes:owner>
+    <itunes:explicit>no</itunes:explicit>
+    <itunes:owner>
       <itunes:name>${cdata(CONFIG.author)}</itunes:name>
       <itunes:email>${CONFIG.email}</itunes:email>
     </itunes:owner>
@@ -129,18 +116,14 @@ export async function onRequestGet(context) {
     for (const post of results) {
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
-
-      // Spintax
+      
       const seed = post.KodeUnik || post.Judul;
       const t_prefix = spinTextStable(SPINTAX_PREFIX, seed + "ppref");
       const t_suffix = spinTextStable(SPINTAX_SUFFIX, seed + "psuff");
       const finalTitle = `${t_prefix} ${post.Judul} ${t_suffix}`;
 
-      // Deskripsi: Firstory memisahkan Plain Text vs HTML
       const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
       
-      // HTML Content (Show Notes)
-      // Kita bungkus HTML postingan agar tampil rapi di Spotify
       const htmlContent = `
         <p>${post.Deskripsi || ""}</p>
         <hr/>
@@ -148,29 +131,23 @@ export async function onRequestGet(context) {
         <p><strong>Listen here:</strong> <a href="${postUrl}">${postUrl}</a></p>
       `;
 
-      // Image Episode
       let episodeImage = CONFIG.image;
       if (post.Image) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
       }
 
-      // Size & Duration Dummy
-      const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000); // Bytes
-      const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200); // Seconds
+      const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
+      const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200);
 
-      xml += `
+      xmlBody += `
     <item>
       <title>${cdata(finalTitle)}</title>
       <link>${postUrl}</link>
       <guid isPermaLink="false">${post.KodeUnik}</guid>
-      <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : new Date().toUTCString()}</pubDate>
-      
+      <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : lastBuildDate}</pubDate>
       <enclosure url="${audioUrl}" type="audio/mpeg" length="${dummySize}"/>
-      
       <description>${cdata(rawDesc.substring(0, 300) + "...")}</description>
-      
       <content:encoded>${cdata(htmlContent)}</content:encoded>
-      
       <itunes:duration>${dummyDuration}</itunes:duration>
       <itunes:explicit>no</itunes:explicit>
       <itunes:image href="${episodeImage}"/>
@@ -179,19 +156,32 @@ export async function onRequestGet(context) {
 `;
     }
 
-    xml += `
+    xmlBody += `
   </channel>
 </rss>`;
 
-    // .trim() di akhir sangat PENTING untuk hapus spasi kosong penyebab error
-    return new Response(xml.trim(), {
+    // --- CRITICAL FIX: ENCODING & CONTENT-LENGTH ---
+    // 1. Bersihkan spasi kosong di awal/akhir
+    const finalXmlString = xmlBody.trim();
+    
+    // 2. Ubah String ke Uint8Array (Byte) untuk hitung ukuran pasti
+    const encoder = new TextEncoder();
+    const data = encoder.encode(finalXmlString);
+    
+    // 3. Return Response dengan Content-Length Eksplisit
+    return new Response(data, {
+      status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "public, s-maxage=3600", 
+        // Memberitahu validator ukuran file sebenarnya (mengatasi error 'Cant read contents')
+        "Content-Length": data.byteLength.toString(),
+        // Header tambahan agar validator senang
+        "Last-Modified": lastBuildDate,
+        "ETag": `"${stringToHash(finalXmlString)}"` // Simple ETag
       },
     });
 
   } catch (e) {
-    return new Response(`XML Gen Error: ${e.message}`, { status: 500 });
+    return new Response(`Error: ${e.message}`, { status: 500 });
   }
 }
