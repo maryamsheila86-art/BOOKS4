@@ -4,7 +4,7 @@ const CONFIG = {
   title: "Audiobook Collection",
   description: "Listen to the best audiobooks and reviews.", 
   author: "Ebook Library",
-  email: "admin@flowork.cloud", 
+  email: "coro@dalbankeak.co.uk", 
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
