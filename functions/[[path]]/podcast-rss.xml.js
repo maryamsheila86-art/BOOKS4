@@ -18,12 +18,10 @@ const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:
 {Guide|Book|Novel|Material}`;
 const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
 
-// --- HELPER: CLEANER & ENCODER ---
+// --- HELPER: CLEANER ---
 function cdata(str) {
   if (!str) return "";
-  // Hapus karakter kontrol ASCII yang merusak XML (Vertical tab, null, dll)
   let clean = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Escape CDATA closing tags
   clean = clean.replace(/]]>/g, "]]]]><![CDATA[>");
   return `<![CDATA[${clean}]]>`;
 }
@@ -63,7 +61,6 @@ export async function onRequestGet(context) {
     const SITE_URL = forwardedHost ? `${url.protocol}//${forwardedHost}` : url.origin;
     const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // Query DB
     const pathSegments = params.path || [];
     const filterKategori = pathSegments[0] || null;
     const queryParams = [];
@@ -82,7 +79,6 @@ export async function onRequestGet(context) {
     const lastBuildDate = new Date().toUTCString();
 
     // --- XML CONSTRUCTION ---
-    // Kita bangun string XML-nya dulu
     let xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
@@ -160,24 +156,25 @@ export async function onRequestGet(context) {
   </channel>
 </rss>`;
 
-    // --- CRITICAL FIX: ENCODING & CONTENT-LENGTH ---
-    // 1. Bersihkan spasi kosong di awal/akhir
+    // --- DATA PREPARATION ---
     const finalXmlString = xmlBody.trim();
-    
-    // 2. Ubah String ke Uint8Array (Byte) untuk hitung ukuran pasti
     const encoder = new TextEncoder();
     const data = encoder.encode(finalXmlString);
     
-    // 3. Return Response dengan Content-Length Eksplisit
     return new Response(data, {
       status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        // Memberitahu validator ukuran file sebenarnya (mengatasi error 'Cant read contents')
+        
+        // --- HEADER WAJIB UNTUK VALIDATOR ---
         "Content-Length": data.byteLength.toString(),
-        // Header tambahan agar validator senang
         "Last-Modified": lastBuildDate,
-        "ETag": `"${stringToHash(finalXmlString)}"` // Simple ETag
+        "ETag": `"${stringToHash(finalXmlString)}"`,
+        
+        // --- MATIKAN KOMPRESI (FIX FATAL ERROR) ---
+        // 'no-transform' melarang Cloudflare melakukan GZIP/Brotli
+        // sehingga Content-Length kita tetap akurat.
+        "Cache-Control": "no-transform", 
       },
     });
 
