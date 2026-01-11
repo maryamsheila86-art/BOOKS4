@@ -8,20 +8,21 @@ const CONFIG = {
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  // Image wajib valid (JPG/PNG, min 1400x1400)
-  image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
+  image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover", // Pastikan URL ini JPG/PNG valid
 };
 
-// --- SPINTAX ---
+// --- SPINTAX CONFIG ---
 const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:} \
 {Full Version|Unabridged|Complete|Essential} \
 {Guide|Book|Novel|Material}`;
 const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
 
-// --- HELPER: CLEANER ---
+// --- HELPER FUNCTIONS ---
 function cdata(str) {
   if (!str) return "";
+  // Hapus karakter 'hantu' yang merusak XML
   let clean = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  // Pastikan CDATA tidak crash jika ada CDATA lain di dalamnya
   clean = clean.replace(/]]>/g, "]]]]><![CDATA[>");
   return `<![CDATA[${clean}]]>`;
 }
@@ -78,8 +79,9 @@ export async function onRequestGet(context) {
     const feedTitle = filterKategori ? `${CONFIG.title} - ${filterKategori}` : CONFIG.title;
     const lastBuildDate = new Date().toUTCString();
 
-    // --- XML CONSTRUCTION ---
-    let xmlBody = `<?xml version="1.0" encoding="UTF-8"?>
+    // --- XML HEADER ---
+    // Kita gunakan header standar Firstory/Anchor
+    let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
   xmlns:content="http://purl.org/rss/1.0/modules/content/"
@@ -135,7 +137,7 @@ export async function onRequestGet(context) {
       const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
       const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200);
 
-      xmlBody += `
+      xml += `
     <item>
       <title>${cdata(finalTitle)}</title>
       <link>${postUrl}</link>
@@ -152,29 +154,22 @@ export async function onRequestGet(context) {
 `;
     }
 
-    xmlBody += `
+    xml += `
   </channel>
 </rss>`;
 
-    // --- DATA PREPARATION ---
-    const finalXmlString = xmlBody.trim();
-    const encoder = new TextEncoder();
-    const data = encoder.encode(finalXmlString);
-    
-    return new Response(data, {
+    // --- FINAL OUTPUT ---
+    // 1. Trim spasi kosong di awal/akhir
+    const finalOutput = xml.trim();
+
+    // 2. Return Response SEDERHANA
+    // Kita pakai content-type 'text/xml' yang lebih aman diterima validator
+    // Kita TIDAK mengirim Content-Length manual agar Cloudflare tidak bingung
+    return new Response(finalOutput, {
       status: 200,
       headers: {
-        "Content-Type": "application/rss+xml; charset=utf-8",
-        
-        // --- HEADER WAJIB UNTUK VALIDATOR ---
-        "Content-Length": data.byteLength.toString(),
-        "Last-Modified": lastBuildDate,
-        "ETag": `"${stringToHash(finalXmlString)}"`,
-        
-        // --- MATIKAN KOMPRESI (FIX FATAL ERROR) ---
-        // 'no-transform' melarang Cloudflare melakukan GZIP/Brotli
-        // sehingga Content-Length kita tetap akurat.
-        "Cache-Control": "no-transform", 
+        "Content-Type": "text/xml; charset=utf-8", 
+        "Cache-Control": "max-age=3600"
       },
     });
 
