@@ -1,90 +1,75 @@
 // Hardcode: /functions/podcast-audio/[id].mp3.js
 
-// --- [SETTING PENTING] ---
-// Tetap sesuai kode kamu sebelumnya
 const TOTAL_TRACKS = 1;
-const AUDIO_PATH_PREFIX = "/audio/track_";
+const AUDIO_PATH_PREFIX = "/podcast-audio/track_"; 
 const AUDIO_PATH_SUFFIX = ".mp3";
-// -------------------------
 
-/**
- * Simple hash function
- */
 function simpleHash(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash = hash & hash; 
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) & hash; 
   }
   return Math.abs(hash); 
 }
 
-/**
- * Main handler (Ganti jadi onRequest agar bisa handle GET dan HEAD)
- */
 export async function onRequest(context) {
   const { params, request } = context;
-  const id = params.id;
+  const id = params.id || "default";
 
-  // Fallback ID jika parameter kosong
-  if (!id) {
-    return new Response("Not found", { status: 404 });
-  }
-
-  // 1. Logika Hash & Path (TETAP SAMA SEPERTI KODEMU)
+  // 1. Tentukan URL Fisik
   const hash = simpleHash(id);
   const trackNumber = (hash % TOTAL_TRACKS) + 1; 
-  const trackId = trackNumber.toString().padStart(3, "0"); 
-  
-  // URL Target: /audio/track_001.mp3
+  const trackId = trackNumber.toString().padStart(3, "0");
   const targetAudioUrl = `${AUDIO_PATH_PREFIX}${trackId}${AUDIO_PATH_SUFFIX}`;
 
   const url = new URL(request.url);
   const fullAudioUrl = new URL(targetAudioUrl, url.origin);
 
-  // ============================================================
-  // 🚀 [NEW] BAGIAN KHUSUS UNTUK SOUNDON (HEAD REQUEST)
-  // SoundOn mengecek file ini ada atau tidak tanpa mendownload isinya.
-  // ============================================================
-  if (request.method === "HEAD") {
-    try {
-      // Kita "ping" file aslinya (track_001.mp3)
-      const originalHeadResponse = await fetch(fullAudioUrl.href, { method: "HEAD" });
-      
-      // Kembalikan status & header file asli ke SoundOn
-      return new Response(null, {
-        status: originalHeadResponse.status,
-        headers: originalHeadResponse.headers
-      });
-    } catch (e) {
-      // Jika error saat cek file asli
-      return new Response(null, { status: 404 });
-    }
-  }
-  // ============================================================
+  const fetchAudio = async (method) => {
+    const requestHeaders = new Headers(request.headers);
+    return await fetch(fullAudioUrl.href, {
+      method: method,
+      headers: requestHeaders
+    });
+  };
 
-  // 2. Logika GET (Download/Play Audio) - TETAP SAMA
   try {
-    const response = await fetch(fullAudioUrl.href);
+    // HEAD Request (Validator Check)
+    if (request.method === "HEAD") {
+      const resp = await fetchAudio("HEAD");
+      if (!resp.ok) return new Response(null, { status: 404 });
 
-    if (!response.ok) {
-      return new Response(
-        `File not found: ${targetAudioUrl}. Pastikan file 'track_001.mp3' ada di folder '/audio/'`,
-        { status: 404 }
-      );
+      const newHeaders = new Headers(resp.headers);
+      // 🔥 FIX FATAL ERROR CONTENT TYPE
+      newHeaders.set("Content-Type", "audio/mpeg"); 
+      newHeaders.set("Accept-Ranges", "bytes");
+      newHeaders.set("Access-Control-Allow-Origin", "*");
+      
+      return new Response(null, { status: resp.status, headers: newHeaders });
     }
 
-    const newHeaders = new Headers(response.headers);
-    // Tambahan: Access-Control agar bisa diputar di player luar
-    newHeaders.set("Access-Control-Allow-Origin", "*");
-    newHeaders.set("Cache-Control", "public, s-maxage=86400, max-age=86400");
+    // GET Request
+    const resp = await fetchAudio("GET");
+    if (!resp.ok) return new Response(`File not found: ${targetAudioUrl}`, { status: 404 });
 
-    return new Response(response.body, {
-      status: 200,
+    const newHeaders = new Headers(resp.headers);
+    
+    // 🔥 FIX FATAL ERROR CONTENT TYPE
+    // Kita timpa apapun balasan server dengan audio/mpeg yang valid
+    newHeaders.set("Content-Type", "audio/mpeg"); 
+    newHeaders.set("Accept-Ranges", "bytes");
+    newHeaders.set("Access-Control-Allow-Origin", "*");
+    
+    // 🔥 PENTING: NO-TRANSFORM
+    // Mencegah Cloudflare melakukan GZIP/Brotli pada file MP3 yang merusak validasi
+    newHeaders.set("Cache-Control", "public, max-age=86400, no-transform"); 
+
+    return new Response(resp.body, {
+      status: resp.status,
       headers: newHeaders,
     });
+
   } catch (e) {
-    return new Response(`Error fetching audio: ${e.message}`, { status: 500 });
+    return new Response(`Error: ${e.message}`, { status: 500 });
   }
 }
