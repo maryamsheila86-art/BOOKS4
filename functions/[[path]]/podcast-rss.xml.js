@@ -12,10 +12,21 @@ const CONFIG = {
   image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
 };
 
-const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:} \
-{Full Version|Unabridged|Complete|Essential} \
-{Guide|Book|Novel|Material}`;
-const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
+// --- CONFIG: SPINTAX (DIAMBIL DARI RSS.XML.JS) ---
+// Prefix Variations
+const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
+{PDF|Epub|Mobi|Audiobook|Kindle|Book} \
+{Online|Directly|Instant|Fast}`;
+
+const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} \
+{No Sign Up|Direct Link|High Speed|Free Account} \
+{Best Seller|Trending|Viral|Must Read}`;
+
+// Multi-language Variations
+const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} \
+{Free|Kostenlos|Gratuit|Gratis} \
+{PDF|Ebook|Livre|Libro}`;
+// --- END CONFIG ---
 
 // --- HELPER FUNCTIONS ---
 function cdata(str) {
@@ -51,8 +62,7 @@ function spinTextStable(text, seedStr) {
 }
 
 // -----------------------------------------------------------------
-// PERUBAHAN UTAMA: Ganti 'onRequestGet' jadi 'onRequest'
-// Agar bisa merespon HEAD request dari SoundOn/Firstory
+// HANDLER UTAMA
 // -----------------------------------------------------------------
 export async function onRequest(context) {
   const { env, request, params } = context;
@@ -81,7 +91,7 @@ export async function onRequest(context) {
       queryParams.push(filterKategori);
     }
     
-    // LIMIT 50 (Produksi)
+    // LIMIT 50 (Standar Podcast agar tidak terlalu berat saat parsing)
     query += " ORDER BY tangal DESC LIMIT 50"; 
     
     const stmt = db.prepare(query).bind(...queryParams);
@@ -126,12 +136,26 @@ export async function onRequest(context) {
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
       
       const seed = post.KodeUnik || post.Judul;
-      const t_prefix = spinTextStable(SPINTAX_PREFIX, seed + "ppref");
-      const t_suffix = spinTextStable(SPINTAX_SUFFIX, seed + "psuff");
-      const finalTitle = `${t_prefix} ${post.Judul} ${t_suffix}`;
-
       const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
       
+      // --- LOGIKA SPINTAX BARU (MENGADOPSI DARI RSS.XML.JS) ---
+      const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
+      let awalan = "";
+      let akhiran = "";
+
+      if (isMultiLang) {
+        // Mode Multi Bahasa
+        awalan = spinTextStable(MULTI_LANG_PREFIX, seed + "prefix");
+        akhiran = spinTextStable("{2025|2026|Full}", seed + "suffix"); 
+      } else {
+        // Mode Bahasa Inggris (Standard)
+        awalan = spinTextStable(SPINTAX_PREFIX, seed + "prefix");
+        akhiran = spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
+      }
+
+      const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
+      // ---------------------------------------------------------
+
       const htmlContent = `
         <p>${post.Deskripsi || ""}</p>
         <hr/>
@@ -144,6 +168,7 @@ export async function onRequest(context) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
       }
 
+      // Generate durasi & size dummy yang konsisten berdasarkan hash
       const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
       const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200);
 
@@ -175,9 +200,8 @@ export async function onRequest(context) {
     return new Response(data, {
       status: 200,
       headers: {
-        // Kita kembalikan ke standar RSS+XML agar SoundOn mengenali formatnya
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "no-transform",
+        "Cache-Control": "no-transform", // Penting agar tidak di-cache agresif oleh platform podcast
         "Content-Length": data.byteLength.toString(),
         "Access-Control-Allow-Origin": "*" 
       },
