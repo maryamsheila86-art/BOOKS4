@@ -4,44 +4,23 @@ const DEFAULT_CONFIG = {
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  // Default image (fallback jika seed gagal)
-  defaultImage: "https://picsum.photos/1400/1400",
+  // HAPUS DEFAULT IMAGE LAMA
 };
 
-// ============================================================
-// 1. IDENTITY SPINTAX
-// ============================================================
+// --- SPINTAX CONFIG (Sama seperti sebelumnya) ---
 const FEED_TITLE_SPIN = `{Audiobook Collection|Best Audio Library|Daily Listen|Podcast Books|Story Time|Audio Archive|The Reader's Hub|Digital Book Shelf}`;
 const FEED_DESC_SPIN = `{Listen to the best audiobooks and reviews.|Your daily dose of stories and audio reviews.|Complete collection of audiobooks for free.|Unabridged audiobooks and summaries.|Top rated stories and educational materials.|Archive of classic and modern literature.}`;
 const FEED_AUTHOR_SPIN = `{Ebook Library|Audio Team|Story Teller|Book Lover|Digital Archive|Net Reader|The Librarian|Audio Admin}`;
 
-// ============================================================
-// 2. KEYWORD SPINTAX
-// ============================================================
-const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
-{PDF|Epub|Mobi|Audiobook|Kindle|Book} \
-{Online|Directly|Instant|Fast}`;
+const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} {PDF|Epub|Mobi|Audiobook|Kindle|Book} {Online|Directly|Instant|Fast}`;
+const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} {No Sign Up|Direct Link|High Speed|Free Account} {Best Seller|Trending|Viral|Must Read}`;
+const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} {Free|Kostenlos|Gratuit|Gratis} {PDF|Ebook|Livre|Libro}`;
 
-const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} \
-{No Sign Up|Direct Link|High Speed|Free Account} \
-{Best Seller|Trending|Viral|Must Read}`;
-
-const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} \
-{Free|Kostenlos|Gratuit|Gratis} \
-{PDF|Ebook|Livre|Libro}`;
-
-// ============================================================
-// 3. BACKLINK SPINTAX
-// ============================================================
-const PINTEREST_INTRO = `{For more visual guides|To see the book cover and details|For related images and pinboards|Check out our visual collection|Discover more about this title} \
-{visit our Pinterest|check this Board|on our Pinterest Board|view the gallery|see the pin}`;
+const PINTEREST_INTRO = `{For more visual guides|To see the book cover and details|For related images and pinboards|Check out our visual collection|Discover more about this title} {visit our Pinterest|check this Board|on our Pinterest Board|view the gallery|see the pin}`;
 const PINTEREST_ANCHOR = `{View Board|Visit Pinterest|See Collection|Visual Guide|Pin It}`;
-
-const TIER2_INTRO = `{Also available on|Listen on our partner platform|Supported by|Alternative streaming link|Mirror link for this episode} \
-{via|at|on|checking|visiting}`;
+const TIER2_INTRO = `{Also available on|Listen on our partner platform|Supported by|Alternative streaming link|Mirror link for this episode} {via|at|on|checking|visiting}`;
 const TIER2_ANCHOR = `{Official Stream|Partner Site|High Speed Server|External Player|Mirror Source}`;
-
-// ============================================================
+// ------------------------------------------------
 
 function cdata(str) {
   if (!str) return "";
@@ -94,12 +73,10 @@ export async function onRequest(context) {
   try {
     const url = new URL(request.url);
     const forwardedHost = request.headers.get("X-Forwarded-Host");
-    
     const CURRENT_HOST = forwardedHost || url.host;
     const SITE_URL = `${url.protocol}//${CURRENT_HOST}`;
     const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // Parsing Path
     const pathSegments = params.path || [];
     const categoryParam = pathSegments[0]; 
     const usernameParam = pathSegments[1]; 
@@ -107,22 +84,15 @@ export async function onRequest(context) {
     const pintBoardParam = pathSegments[3]; 
     const extraBacklinkSegments = pathSegments.slice(4); 
 
-    // --- SETUP IDENTITY & EMAIL ---
     const emailUser = usernameParam || "contact";
     const emailDomain = getRootDomain(CURRENT_HOST);
     const DYNAMIC_EMAIL = `${emailUser}@${emailDomain}`;
-
-    // Identity Spintax
     const identitySeed = (categoryParam || "") + (usernameParam || "");
     
-    // 🚀 UPDATED: Tidak lagi menampilkan categoryParam (ebook1, ebook2) di Judul
-    // Judul murni hasil spin, misal "The Reader's Hub"
     const dynamicFeedTitle = spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
-    
     const dynamicFeedDesc = spinTextStable(FEED_DESC_SPIN, identitySeed + "desc");
     const dynamicFeedAuthor = spinTextStable(FEED_AUTHOR_SPIN, identitySeed + "auth");
 
-    // --- SETUP LINKS ---
     let rawPinterestUrl = "";
     if (pintUserParam && pintBoardParam) {
         rawPinterestUrl = `https://www.pinterest.com/${pintUserParam}/${pintBoardParam}/`;
@@ -131,12 +101,10 @@ export async function onRequest(context) {
     let rawTier2Url = "";
     if (extraBacklinkSegments.length > 0) {
         rawTier2Url = extraBacklinkSegments.join("/");
-        if (!rawTier2Url.startsWith("http")) {
-            rawTier2Url = "https://" + rawTier2Url;
-        }
+        if (!rawTier2Url.startsWith("http")) rawTier2Url = "https://" + rawTier2Url;
     }
 
-    // --- QUERY DB ---
+    // QUERY DB
     const queryParams = [];
     let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
     if (categoryParam) {
@@ -151,45 +119,34 @@ export async function onRequest(context) {
     const lastBuildDate = new Date().toUTCString();
 
     // ============================================================
-    // 🚀 LOGIKA PICSUM SEEDED COVER (STABIL PER USER)
+    // 🚀 PERBAIKAN GAMBAR: GUNAKAN PROXY
+    // Agar tidak error "Redirect" di validator
     // ============================================================
     const picsumSeed = identitySeed || "default";
-    const channelCoverUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
+    const rawPicsumUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
+    // Kita bungkus URL Picsum ke dalam Image Proxy kita sendiri
+    const channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(rawPicsumUrl)}`;
     // ============================================================
 
-    // XML HEADER
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" 
-  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
-  xmlns:content="http://purl.org/rss/1.0/modules/content/"
-  xmlns:podcast="https://podcastindex.org/namespace/1.0"
-  xmlns:atom="http://www.w3.org/2005/Atom">
-  <channel>
-    <title>${cdata(dynamicFeedTitle)}</title>
-    <link>${SITE_URL}</link>
-    <description>${cdata(dynamicFeedDesc)}</description>
-    <language>${DEFAULT_CONFIG.language}</language>
-    <copyright>${cdata(dynamicFeedAuthor)}</copyright>
-    <lastBuildDate>${lastBuildDate}</lastBuildDate>
-    <generator>Firstory</generator>
-    <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
-    <itunes:summary>${cdata(dynamicFeedDesc)}</itunes:summary>
-    <itunes:author>${cdata(dynamicFeedAuthor)}</itunes:author>
-    <itunes:type>episodic</itunes:type>
-    <itunes:explicit>no</itunes:explicit>
-    <itunes:owner>
-      <itunes:name>${cdata(dynamicFeedAuthor)}</itunes:name>
-      <itunes:email>${DYNAMIC_EMAIL}</itunes:email>
-    </itunes:owner>
-    <itunes:image href="${channelCoverUrl}"/>
-    <image>
-      <url>${channelCoverUrl}</url>
-      <title>${cdata(dynamicFeedTitle)}</title>
-      <link>${SITE_URL}</link>
-    </image>
-    <itunes:category text="${DEFAULT_CONFIG.category}">
-      <itunes:category text="${DEFAULT_CONFIG.subCategory}"/>
-    </itunes:category>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+<title>${cdata(dynamicFeedTitle)}</title>
+<link>${SITE_URL}</link>
+<description>${cdata(dynamicFeedDesc)}</description>
+<language>${DEFAULT_CONFIG.language}</language>
+<copyright>${cdata(dynamicFeedAuthor)}</copyright>
+<lastBuildDate>${lastBuildDate}</lastBuildDate>
+<generator>Firstory</generator>
+<atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
+<itunes:summary>${cdata(dynamicFeedDesc)}</itunes:summary>
+<itunes:author>${cdata(dynamicFeedAuthor)}</itunes:author>
+<itunes:type>episodic</itunes:type>
+<itunes:explicit>no</itunes:explicit>
+<itunes:owner><itunes:name>${cdata(dynamicFeedAuthor)}</itunes:name><itunes:email>${DYNAMIC_EMAIL}</itunes:email></itunes:owner>
+<itunes:image href="${channelCoverUrl}"/>
+<image><url>${channelCoverUrl}</url><title>${cdata(dynamicFeedTitle)}</title><link>${SITE_URL}</link></image>
+<itunes:category text="${DEFAULT_CONFIG.category}"><itunes:category text="${DEFAULT_CONFIG.subCategory}"/></itunes:category>
 `;
 
     for (const post of results) {
@@ -198,42 +155,18 @@ export async function onRequest(context) {
       const seed = post.KodeUnik || post.Judul;
 
       const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
-      let awalan = "", akhiran = "";
-      if (isMultiLang) {
-        awalan = spinTextStable(MULTI_LANG_PREFIX, seed + "prefix");
-        akhiran = spinTextStable("{2025|2026|Full}", seed + "suffix"); 
-      } else {
-        awalan = spinTextStable(SPINTAX_PREFIX, seed + "prefix");
-        akhiran = spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
-      }
+      let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
+      let akhiran = isMultiLang ? spinTextStable("{2025|2026|Full}", seed + "suffix") : spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
       const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
-      // Backlinks
-      let pinterestPart = "";
-      if (rawPinterestUrl) {
-        const pIntro = spinTextStable(PINTEREST_INTRO, seed + "pintro");
-        const pAnchor = spinTextStable(PINTEREST_ANCHOR, seed + "panchor");
-        pinterestPart = `<p>📌 ${pIntro}: <a href="${rawPinterestUrl}">${pAnchor}</a></p>`;
-      }
+      let pinterestPart = rawPinterestUrl ? `<p>📌 ${spinTextStable(PINTEREST_INTRO, seed + "pintro")}: <a href="${rawPinterestUrl}">${spinTextStable(PINTEREST_ANCHOR, seed + "panchor")}</a></p>` : "";
+      let tier2Part = rawTier2Url ? `<p>🎧 ${spinTextStable(TIER2_INTRO, seed + "tintro")} <strong><a href="${rawTier2Url}">${spinTextStable(TIER2_ANCHOR, seed + "tanchor")}</a></strong></p>` : "";
+      
+      const htmlContent = `<p>${post.Deskripsi || ""}</p><hr/><p><strong>Episode Info:</strong> ${post.Judul}</p>${pinterestPart}${tier2Part}<p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>`;
 
-      let tier2Part = "";
-      if (rawTier2Url) {
-        const tIntro = spinTextStable(TIER2_INTRO, seed + "tintro");
-        const tAnchor = spinTextStable(TIER2_ANCHOR, seed + "tanchor");
-        tier2Part = `<p>🎧 ${tIntro} <strong><a href="${rawTier2Url}">${tAnchor}</a></strong></p>`;
-      }
-
-      const htmlContent = `
-        <p>${post.Deskripsi || ""}</p>
-        <hr/>
-        <p><strong>Episode Info:</strong> ${post.Judul}</p>
-        ${pinterestPart}
-        ${tier2Part}
-        <p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>
-      `;
-
-      let episodeImage = DEFAULT_CONFIG.defaultImage;
+      // GUNAKAN PROXY JUGA UNTUK GAMBAR EPISODE
+      let episodeImage = channelCoverUrl; // Default ke cover channel
       if (post.Image) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
       }
@@ -241,28 +174,24 @@ export async function onRequest(context) {
       const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
       const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200);
 
-      xml += `
-    <item>
-      <title>${cdata(finalTitle)}</title>
-      <link>${postUrl}</link>
-      <guid isPermaLink="false">${post.KodeUnik}</guid>
-      <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : lastBuildDate}</pubDate>
-      <enclosure url="${audioUrl}" type="audio/mpeg" length="${dummySize}"/>
-      <description>${cdata(rawDesc.substring(0, 300) + "...")}</description>
-      <content:encoded>${cdata(htmlContent)}</content:encoded>
-      <itunes:duration>${dummyDuration}</itunes:duration>
-      <itunes:explicit>no</itunes:explicit>
-      <itunes:image href="${episodeImage}"/>
-      <itunes:episodeType>full</itunes:episodeType>
-    </item>
-`;
+      xml += `<item>
+<title>${cdata(finalTitle)}</title>
+<link>${postUrl}</link>
+<guid isPermaLink="false">${post.KodeUnik}</guid>
+<pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : lastBuildDate}</pubDate>
+<enclosure url="${audioUrl}" type="audio/mpeg" length="${dummySize}"/>
+<description>${cdata(rawDesc.substring(0, 300) + "...")}</description>
+<content:encoded>${cdata(htmlContent)}</content:encoded>
+<itunes:duration>${dummyDuration}</itunes:duration>
+<itunes:explicit>no</itunes:explicit>
+<itunes:image href="${episodeImage}"/>
+<itunes:episodeType>full</itunes:episodeType>
+</item>`;
     }
 
-    xml += `
-  </channel>
-</rss>`;
+    xml += `</channel></rss>`;
 
-    const finalString = xml.trim();
+    const finalString = xml.trim(); 
     const encoder = new TextEncoder();
     const data = encoder.encode(finalString);
 
@@ -270,7 +199,7 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "no-transform",
+        "Cache-Control": "no-transform", // PENTING: Mencegah Cloudflare mengompres XML
         "Content-Length": data.byteLength.toString(),
         "Access-Control-Allow-Origin": "*" 
       },
