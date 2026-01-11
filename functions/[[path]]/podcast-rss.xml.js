@@ -114,9 +114,11 @@ export async function onRequest(context) {
 
     // Identity Spintax
     const identitySeed = (categoryParam || "") + (usernameParam || "");
-    const dynamicFeedTitle = categoryParam 
-        ? `${spinTextStable(FEED_TITLE_SPIN, identitySeed + "title")} - ${categoryParam}`
-        : spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
+    
+    // 🚀 UPDATED: Tidak lagi menampilkan categoryParam (ebook1, ebook2) di Judul
+    // Judul murni hasil spin, misal "The Reader's Hub"
+    const dynamicFeedTitle = spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
+    
     const dynamicFeedDesc = spinTextStable(FEED_DESC_SPIN, identitySeed + "desc");
     const dynamicFeedAuthor = spinTextStable(FEED_AUTHOR_SPIN, identitySeed + "auth");
 
@@ -151,10 +153,6 @@ export async function onRequest(context) {
     // ============================================================
     // 🚀 LOGIKA PICSUM SEEDED COVER (STABIL PER USER)
     // ============================================================
-    // Kita gunakan 'identitySeed' (gabungan kategori + username)
-    // Jadi Miller di kategori Art akan punya gambar beda dengan Miller di kategori Tech
-    // Tapi tetap konsisten/stabil (tidak berubah-ubah saat refresh)
-    
     const picsumSeed = identitySeed || "default";
     const channelCoverUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
     // ============================================================
@@ -235,7 +233,6 @@ export async function onRequest(context) {
         <p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>
       `;
 
-      // Episode Image (Tetap pakai cover buku, karena spesifik per konten)
       let episodeImage = DEFAULT_CONFIG.defaultImage;
       if (post.Image) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
