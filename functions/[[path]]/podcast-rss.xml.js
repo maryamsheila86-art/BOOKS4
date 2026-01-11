@@ -1,22 +1,22 @@
 // Hardcode: /functions/[[path]]/podcast.xml.js
 
 const DEFAULT_CONFIG = {
-  // Config ini hanya fallback, nilai sebenarnya sekarang pakai Spintax di bawah
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
+  // Default image (fallback jika seed gagal)
+  defaultImage: "https://picsum.photos/1400/1400",
 };
 
 // ============================================================
-// 1. IDENTITY SPINTAX (JUDUL/AUTHOR FEED BERUBAH-UBAH)
+// 1. IDENTITY SPINTAX
 // ============================================================
 const FEED_TITLE_SPIN = `{Audiobook Collection|Best Audio Library|Daily Listen|Podcast Books|Story Time|Audio Archive|The Reader's Hub|Digital Book Shelf}`;
 const FEED_DESC_SPIN = `{Listen to the best audiobooks and reviews.|Your daily dose of stories and audio reviews.|Complete collection of audiobooks for free.|Unabridged audiobooks and summaries.|Top rated stories and educational materials.|Archive of classic and modern literature.}`;
 const FEED_AUTHOR_SPIN = `{Ebook Library|Audio Team|Story Teller|Book Lover|Digital Archive|Net Reader|The Librarian|Audio Admin}`;
 
 // ============================================================
-// 2. KEYWORD SPINTAX (UNTUK JUDUL EPISODE)
+// 2. KEYWORD SPINTAX
 // ============================================================
 const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
 {PDF|Epub|Mobi|Audiobook|Kindle|Book} \
@@ -31,7 +31,7 @@ const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Desca
 {PDF|Ebook|Livre|Libro}`;
 
 // ============================================================
-// 3. BACKLINK SPINTAX (NATURAL SENTENCES)
+// 3. BACKLINK SPINTAX
 // ============================================================
 const PINTEREST_INTRO = `{For more visual guides|To see the book cover and details|For related images and pinboards|Check out our visual collection|Discover more about this title} \
 {visit our Pinterest|check this Board|on our Pinterest Board|view the gallery|see the pin}`;
@@ -99,7 +99,7 @@ export async function onRequest(context) {
     const SITE_URL = `${url.protocol}//${CURRENT_HOST}`;
     const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // Parsing URL
+    // Parsing Path
     const pathSegments = params.path || [];
     const categoryParam = pathSegments[0]; 
     const usernameParam = pathSegments[1]; 
@@ -112,14 +112,11 @@ export async function onRequest(context) {
     const emailDomain = getRootDomain(CURRENT_HOST);
     const DYNAMIC_EMAIL = `${emailUser}@${emailDomain}`;
 
-    // 🚀 GENERATE DYNAMIC FEED META (Title, Desc, Author)
-    // Seed menggunakan 'category + username' agar stabil per URL tapi beda antar user
+    // Identity Spintax
     const identitySeed = (categoryParam || "") + (usernameParam || "");
-    
     const dynamicFeedTitle = categoryParam 
         ? `${spinTextStable(FEED_TITLE_SPIN, identitySeed + "title")} - ${categoryParam}`
         : spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
-        
     const dynamicFeedDesc = spinTextStable(FEED_DESC_SPIN, identitySeed + "desc");
     const dynamicFeedAuthor = spinTextStable(FEED_AUTHOR_SPIN, identitySeed + "auth");
 
@@ -151,7 +148,18 @@ export async function onRequest(context) {
 
     const lastBuildDate = new Date().toUTCString();
 
-    // XML HEADER (Gunakan Variable Dynamic)
+    // ============================================================
+    // 🚀 LOGIKA PICSUM SEEDED COVER (STABIL PER USER)
+    // ============================================================
+    // Kita gunakan 'identitySeed' (gabungan kategori + username)
+    // Jadi Miller di kategori Art akan punya gambar beda dengan Miller di kategori Tech
+    // Tapi tetap konsisten/stabil (tidak berubah-ubah saat refresh)
+    
+    const picsumSeed = identitySeed || "default";
+    const channelCoverUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
+    // ============================================================
+
+    // XML HEADER
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
@@ -175,7 +183,12 @@ export async function onRequest(context) {
       <itunes:name>${cdata(dynamicFeedAuthor)}</itunes:name>
       <itunes:email>${DYNAMIC_EMAIL}</itunes:email>
     </itunes:owner>
-    <itunes:image href="${DEFAULT_CONFIG.image}"/>
+    <itunes:image href="${channelCoverUrl}"/>
+    <image>
+      <url>${channelCoverUrl}</url>
+      <title>${cdata(dynamicFeedTitle)}</title>
+      <link>${SITE_URL}</link>
+    </image>
     <itunes:category text="${DEFAULT_CONFIG.category}">
       <itunes:category text="${DEFAULT_CONFIG.subCategory}"/>
     </itunes:category>
@@ -186,7 +199,6 @@ export async function onRequest(context) {
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
       const seed = post.KodeUnik || post.Judul;
 
-      // Spintax Judul Episode
       const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
       let awalan = "", akhiran = "";
       if (isMultiLang) {
@@ -199,7 +211,7 @@ export async function onRequest(context) {
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
       const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
-      // Backlink Injection
+      // Backlinks
       let pinterestPart = "";
       if (rawPinterestUrl) {
         const pIntro = spinTextStable(PINTEREST_INTRO, seed + "pintro");
@@ -223,7 +235,8 @@ export async function onRequest(context) {
         <p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>
       `;
 
-      let episodeImage = DEFAULT_CONFIG.image;
+      // Episode Image (Tetap pakai cover buku, karena spesifik per konten)
+      let episodeImage = DEFAULT_CONFIG.defaultImage;
       if (post.Image) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
       }
