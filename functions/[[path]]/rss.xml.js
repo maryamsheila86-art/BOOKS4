@@ -5,6 +5,7 @@ const BLOG_DESCRIPTION = "Download Free PDF Ebooks Best Seller";
 
 // --- CONFIG: SPINTAX (CPA TARGET: TIER 1 COUNTRIES) ---
 // Target: English, German, French, Spanish, Italian.
+// (BAGIAN INI TIDAK DIUBAH SAMA SEKALI DARI FILE 1)
 
 // Prefix Variations
 const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
@@ -38,7 +39,6 @@ function escapeXML(str) {
 
 /**
  * Mengubah string menjadi angka integer (Hash).
- * Gunanya agar "KodeUnik" buku bisa dijadikan angka untuk memilih spintax.
  */
 function stringToHash(string) {
   let hash = 0;
@@ -53,17 +53,11 @@ function stringToHash(string) {
 
 /**
  * Spintax Deterministik.
- * Pilihan kata TIDAK random murni, tapi bergantung pada "seed" (ID Buku).
- * Jadi satu buku akan selalu punya judul yang sama selamanya.
  */
 function spinTextStable(text, seedStr) {
   return text.replace(/\{([^{}]+)\}/g, function (match, content) {
     const choices = content.split("|");
-    
-    // Kita gabungkan seedStr (ID Buku) dengan content spintax itu sendiri
-    // Agar pemilihan kata pertama dan kata kedua tidak selalu sinkron (lebih variatif)
     const uniqueHash = stringToHash(seedStr + content);
-    
     const index = uniqueHash % choices.length;
     return choices[index];
   });
@@ -75,11 +69,23 @@ export async function onRequestGet(context) {
 
   try {
     const url = new URL(request.url);
-    const SITE_URL = url.origin;
+
+    // ============================================================
+    // 🚀 UPGRADE DARI FILE 2: DETEKSI SUBDOMAIN/ROUTER
+    // ============================================================
+    // Mengecek apakah request datang dari Router (misal: user.domain.com)
+    const forwardedHost = request.headers.get("X-Forwarded-Host");
+    
+    // Jika ada header router, pakai itu. Jika tidak, pakai origin asli.
+    const SITE_URL = forwardedHost 
+      ? `${url.protocol}//${forwardedHost}` 
+      : url.origin;
+    // ============================================================
 
     const pathSegments = params.path || [];
     const kategori = pathSegments[0] || null;
 
+    // Logika Query tetap dari File 1 (Limit 50 & Spintax friendly)
     const queryParams = [];
     let query =
       "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
@@ -89,7 +95,7 @@ export async function onRequestGet(context) {
       queryParams.push(kategori);
     }
     
-    // PENTING: Jangan pakai RANDOM() di SQL jika ingin urutan stabil untuk RSS Reader
+    // Tetap urutkan stabil agar RSS Reader senang
     query += " ORDER BY tangal DESC LIMIT 50"; 
     
     const stmt = db.prepare(query).bind(...queryParams);
@@ -98,7 +104,10 @@ export async function onRequestGet(context) {
     const feedTitle = kategori
       ? `${escapeXML(BLOG_TITLE)} - ${escapeXML(kategori)} Collection`
       : escapeXML(BLOG_TITLE);
-    const selfLink = url.href;
+      
+    // 🚀 UPGRADE: Self Link harus mengikuti SITE_URL yang sudah dideteksi router
+    const selfPath = url.pathname; 
+    const selfLink = `${SITE_URL}${selfPath}`;
 
     let xml = `<?xml version="1.0" encoding="UTF-8" ?>
 <rss version="2.0" xmlns:g="http://base.google.com/ns/1.0" xmlns:atom="http://www.w3.org/2005/Atom">
@@ -112,13 +121,13 @@ export async function onRequestGet(context) {
 `;
 
     for (const post of results) {
+      // 🚀 UPGRADE: postUrl sekarang aman menggunakan domain router
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
+      
       const judulAsli = escapeXML(post.Judul);
-      const seed = post.KodeUnik || post.Judul; // Kunci unik per buku
+      const seed = post.KodeUnik || post.Judul; 
 
-      // --- LOGIKA DETERMINISTIK ---
-      // Gunakan hash dari ID buku untuk menentukan apakah dia pakai Multi-Lang atau Inggris
-      // % 100 < 50 artinya 50% peluang, tapi tetap (tidak berubah-ubah untuk buku tsb)
+      // --- LOGIKA SPINTAX DETERMINISTIK (TETAP UTUH) ---
       const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
 
       let awalan = "";
@@ -138,6 +147,7 @@ export async function onRequestGet(context) {
       let proxiedImageUrl = "";
       if (post.Image) {
         const encodedImageUrl = encodeURIComponent(post.Image);
+        // 🚀 UPGRADE: Image Proxy juga aman menggunakan domain router
         proxiedImageUrl = `${SITE_URL}/image-proxy?url=${encodedImageUrl}`;
       }
 
@@ -172,7 +182,6 @@ export async function onRequestGet(context) {
     return new Response(xml, {
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        // Cache boleh diaktifkan kembali karena konten sudah stabil (konsisten)
         "Cache-Control": "s-maxage=3600", 
       },
     });
