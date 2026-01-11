@@ -71,7 +71,7 @@ export async function onRequestGet(context) {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(filterKategori);
     }
-    query += " ORDER BY tangal DESC LIMIT 50"; 
+    query += " ORDER BY tangal DESC LIMIT 1"; 
     
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
