@@ -1,160 +1,202 @@
-// --- [CONFIG] ---
-const MAIN_DOMAIN = "domainutama.com"; 
-const BLOG_TITLE = "EBOOK LIBRARY";
-const BLOG_DESCRIPTION = "Download Free PDF Ebooks Best Seller";
+// Hardcode: /functions/[[path]]/podcast-rss.xml.js
+// [MODIFIED] Full upgrade to professional Podcast RSS format (like Buzzsprout)
+// [FIXED] Added missing PODCAST_LOCKED variable
+// [FIXED 2] Fixed syntax error 'headers {' to 'headers: {'
+// [FIXED 3] Fixed typo 'akhirAkhir' to 'judulAkhir'
 
-// --- SPINTAX ASLI (RESTORED DARI RSS.XML.JS) ---
-const SPINTAX_PREFIX = `{Download|Get|Free|Read|Review|Grab} \
-{PDF|Epub|Mobi|Audiobook|Kindle|Book} \
-{Online|Directly|Instant|Fast}`;
+const BLOG_TITLE = "PODCAST";
+const BLOG_DESCRIPTION = "THE BEST PODCAST";
 
-const SPINTAX_SUFFIX = `{Full Version|Unabridged|Complete Edition|2026 Updated} \
-{No Sign Up|Direct Link|High Speed|Free Account} \
-{Best Seller|Trending|Viral|Must Read}`;
+// [NEW] Helper function to clean and truncate text for summaries
+function truncateAndClean(str, length = 250) {
+  if (!str) return "";
+  // Strip HTML tags (simple version)
+  const cleanStr = str.replace(/<[^>]*>?/gm, '');
+  // Truncate and add ellipsis
+  const truncated = cleanStr.substring(0, length);
+  return cleanStr.length > length ? truncated + "..." : truncated;
+}
 
-const MULTI_LANG_PREFIX = `{Download|Herunterladen (DE)|Télécharger (FR)|Descargar (ES)|Scarica (IT)} \
-{Free|Kostenlos|Gratuit|Gratis} \
-{PDF|Ebook|Livre|Libro}`;
-
-/**
- * Fungsi Escape XML ketat agar tidak FATAL error.
- */
 function escapeXML(str) {
   if (!str) return "";
-  return str.toString()
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
-function cleanCDATA(str) {
-  if (!str) return "";
-  return str.replace(/]]>/g, "]]&gt;");
-}
-
-function stringToHash(string) {
-  let hash = 0;
-  if (string.length === 0) return hash;
-  for (let i = 0; i < string.length; i++) {
-    hash = ((hash << 5) - hash) + string.charCodeAt(i);
-    hash = hash & hash;
-  }
-  return Math.abs(hash);
-}
-
-function spinTextStable(text, seedStr) {
-  return text.replace(/\{([^{}]+)\}/g, function (match, content) {
-    const choices = content.split("|");
-    const uniqueHash = stringToHash(seedStr + content);
-    return choices[uniqueHash % choices.length];
+  return str.replace(/[<>&"']/g, function (match) {
+    switch (match) {
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case "&":
+        return "&amp;";
+      case '"':
+        return "&quot;";
+      case "'":
+        return "&#39;";
+      default:
+        return match;
+    }
   });
 }
 
 export async function onRequestGet(context) {
   const { env, request, params } = context;
   const db = env.DB;
-  const url = new URL(request.url);
-  const SITE_URL = url.origin;
 
-  const path = params.path || [];
-  if (path.length < 2) {
-    return new Response("Invalid URL Structure", { status: 400 });
-  }
-
-  const kategori = path[0];
-  const username = path[1];
-  
-  let podcastStartIndex = path.findIndex((seg, idx) => idx > 1 && seg.includes('.'));
-  if (podcastStartIndex === -1) podcastStartIndex = path.length;
-
-  const pinterestPath = path.slice(2, podcastStartIndex).join('/');
-  const podcastPath = path.slice(podcastStartIndex).join('/');
-  const contactEmail = `${username}@${MAIN_DOMAIN}`;
+  // --- [SETTINGS PODCAST BARU] ---
+  // Ganti ini sesuai kebutuhan lu
+  const PODCAST_AUTHOR = "Flowork Podcast";
+  const PODCAST_OWNER_NAME = "Flowork";
+  const PODCAST_CHANNEL_IMAGE_URL = "https://via.placeholder.com/1400x1400.png?text=Podcast+Cover"; // Ganti!
+  const PODCAST_CHANNEL_GUID = "c2b6a411-57d1-e910-b31f-1c111db475c5"; // GUID Unik buat channel lu
+  const DEFAULT_DURATION_SECONDS = 600; // 10 menit (karena audio palsu)
+  const DEFAULT_SEASON = 1;
+  const PODCAST_LOCKED = "no"; // [FIX 1]
+  // --- [AKHIR SETTINGS] ---
 
   try {
-    const query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now') ORDER BY tangal DESC LIMIT 30";
-    const { results } = await db.prepare(query).all();
+    const url = new URL(request.url);
+    const SITE_URL = url.origin;
 
-    let channelCoverUrl = `${SITE_URL}/default-cover.jpg`; 
-    if (results.length > 0 && results[0].Image) {
-      channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(results[0].Image)}`;
+    // [MODIFIED] Get parameters from dynamic path
+    const pathSegments = params.path || [];
+    const kategori = pathSegments[0] || "Podcast"; // Ambil segmen pertama, default ke "Podcast"
+    const judulAwal = pathSegments[1] || ""; // Ambil segmen kedua
+    const judulAkhir = pathSegments[2] || ""; // Ambil segmen ketiga
+
+    // 3. Siapin query SQL
+    const queryParams = [];
+    let query =
+      "SELECT ID, Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal IS NOT NULL AND tangal <= DATE('now')";
+
+    if (kategori) {
+      query += " AND UPPER(Kategori) = UPPER(?)";
+      queryParams.push(kategori);
     }
+    query += " ORDER BY tangal DESC LIMIT 500";
 
-    // --- GENERATE XML (IKUTI STRUKTUR FIRSTORY) ---
+    const stmt = db.prepare(query).bind(...queryParams);
+    const { results } = await stmt.all();
+
+    // 4. Bikin judul & link dinamis
+    const feedTitle = kategori
+      ? `${escapeXML(BLOG_TITLE)} - ${escapeXML(kategori)}`
+      : escapeXML(BLOG_TITLE);
+    const selfLink = url.href;
+    const channelTitle = `${judulAwal} ${feedTitle} ${judulAkhir}`;
+
+
+    // 5. Mulai bikin string XML
     let xml = `<?xml version="1.0" encoding="UTF-8" ?>
-<rss version="2.0" 
-    xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
-    xmlns:atom="http://www.w3.org/2005/Atom" 
-    xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0" 
-    xmlns:content="http://purl.org/rss/1.0/modules/content/" 
-    xmlns:media="http://search.yahoo.com/mrss/">
+<?xml-stylesheet href="https://flowork.cloud/podcast-style.xsl" type="text/xsl"?>
+<rss version="2.0"
+  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+  xmlns:podcast="https://podcastindex.org/namespace/1.0"
+  xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>
-  <title>${escapeXML(BLOG_TITLE)} - ${escapeXML(kategori)}</title>
-  <link>${escapeXML(SITE_URL)}</link>
-  <description>${escapeXML(BLOG_DESCRIPTION)}</description>
+  <title>${channelTitle}</title>
+  <link>${SITE_URL}</link>
+  <description><![CDATA[${BLOG_DESCRIPTION} Artikel tentang ${feedTitle} ditulis OLEH <a href="https://flowork.cloud">Flowork</a>]]></description>
   <language>en-us</language>
-  <copyright>2026 ${escapeXML(MAIN_DOMAIN)}</copyright>
   <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-  <atom:link href="${escapeXML(url.href)}" rel="self" type="application/rss+xml" />
-  
-  <itunes:author>${escapeXML(username)}</itunes:author>
-  <itunes:summary>${escapeXML(BLOG_DESCRIPTION)}</itunes:summary>
+  <generator>Flowork (Cloudflare)</generator>
+  <copyright>© ${new Date().getFullYear()} ${PODCAST_OWNER_NAME}</copyright>
+
+  <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
+  <atom:link href="https://pubsubhubbub.appspot.com/" rel="hub" xmlns="http://www.w3.org/2005/Atom" />
+
+  <podcast:locked>${PODCAST_LOCKED}</podcast:locked>
+  <podcast:guid>${PODCAST_CHANNEL_GUID}</podcast:guid>
+
+  <itunes:author>${PODCAST_AUTHOR}</itunes:author>
   <itunes:type>episodic</itunes:type>
-  <itunes:owner>
-    <itunes:name>${escapeXML(username)}</itunes:name>
-    <itunes:email>${escapeXML(contactEmail)}</itunes:email>
-  </itunes:owner>
-  <itunes:image href="${escapeXML(channelCoverUrl)}" />
-  
-  <itunes:category text="Arts">
-    <itunes:category text="Books"/>
-  </itunes:category>
-  
   <itunes:explicit>false</itunes:explicit>
-  <itunes:block>no</itunes:block>
+  <itunes:owner>
+    <itunes:name>${PODCAST_OWNER_NAME}</itunes:name>
+  </itunes:owner>
+  <image>
+     <url>${PODCAST_CHANNEL_IMAGE_URL}</url>
+     <title>${channelTitle}</title>
+     <link>${SITE_URL}</link>
+  </image>
+  <itunes:image href="${PODCAST_CHANNEL_IMAGE_URL}" />
+  <itunes:category text="Education" />
 `;
 
-    for (const post of results) {
-      const seed = post.KodeUnik;
-      
-      // LOGIKA DETERMINISTIK BAHASA (Sama seperti rss.xml.js)
-      const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
-      let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
-      let akhiran = isMultiLang ? spinTextStable("{2025|2026|Full}", seed + "suffix") : spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
+    // 6. Looping setiap postingan
+    const totalResults = results.length;
+    results.forEach((post, i) => {
+      const episodeNumber = totalResults - i; // Episode terbaru = nomor tertinggi
+      const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
+      const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
 
-      const judulBaru = `${awalan} ${post.Judul} ${akhiran}`;
-      
-      const itemImage = post.Image ? `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}` : channelCoverUrl;
-      const audioUrl = `${SITE_URL}/functions/podcast-audio/${post.KodeUnik}.mp3`;
+      // Gabungin judul
+      const judulAsli = escapeXML(post.Judul);
+      // [FIX 3] Ini dia yang bener
+      const judulBaru = `${
+        judulAwal ? escapeXML(judulAwal) + " " : ""
+      }${judulAsli}${judulAkhir ? " " + escapeXML(judulAkhir) : ""}`;
+
+      // Bikin URL gambar proxy
+      let proxiedImageUrl = "";
+      if (post.Image) {
+        const encodedImageUrl = encodeURIComponent(post.Image);
+        proxiedImageUrl = `${SITE_URL}/image-proxy?url=${encodedImageUrl}`;
+      }
 
       xml += `
   <item>
-    <title>${escapeXML(judulBaru)}</title>
-    <itunes:title>${escapeXML(judulBaru)}</itunes:title>
-    <itunes:author>${escapeXML(username)}</itunes:author>
-    <description><![CDATA[${cleanCDATA(post.Deskripsi) || "Listen to this audio version."}<br/><br/>🔗 Pinterest: https://pinterest.com/${pinterestPath}<br/>🎙️ Follow: https://${podcastPath}]]></description>
-    <pubDate>${new Date(post.tangal).toUTCString()}</pubDate>
+    <title>${judulBaru}</title>
+    <itunes:title>${judulBaru}</itunes:title>
+    <link>${postUrl}</link>
     <guid isPermaLink="false">${escapeXML(post.KodeUnik)}</guid>
-    <link>${SITE_URL}/post/${post.KodeUnik}</link>
-    <enclosure url="${escapeXML(audioUrl)}" length="1024000" type="audio/mpeg" />
-    <itunes:image href="${escapeXML(itemImage)}" />
-    <itunes:duration>00:10:00</itunes:duration>
-    <itunes:explicit>false</itunes:explicit>
-    <itunes:episodeType>full</itunes:episodeType>
-  </item>`;
+
+    <description><![CDATA[
+      ${post.Deskripsi || "No description."}
+      <br/><br/>
+      ${BLOG_DESCRIPTION} Artikel tentang ${feedTitle} ditulis OLEH <a href="https://flowork.cloud">Flowork</a>
+    ]]></description>
+    <content:encoded><![CDATA[${post.Deskripsi || "No description."}]]></content:encoded>
+    <itunes:summary>${truncateAndClean(post.Deskripsi)}</itunes:summary>
+
+    ${
+      post.tangal
+        ? `<pubDate>${new Date(post.tangal).toUTCString()}</pubDate>`
+        : ""
     }
 
-    xml += `\n</channel>\n</rss>`;
+    <enclosure url="${audioUrl}" type="audio/mpeg" length="1000000" />
+    <itunes:author>${PODCAST_AUTHOR}</itunes:author>
+    <itunes:duration>${DEFAULT_DURATION_SECONDS}</itunes:duration>
+    <itunes:keywords></itunes:keywords>
+    <itunes:season>${DEFAULT_SEASON}</itunes:season>
+    <itunes:episode>${episodeNumber}</itunes:episode>
+    <itunes:episodeType>full</itunes:episodeType>
+    <itunes:explicit>false</itunes:explicit>
+    ${
+      proxiedImageUrl
+        ? `<itunes:image href="${escapeXML(proxiedImageUrl)}" />`
+        : ""
+    }
+  </item>
+`;
+    }); // Akhir loop forEach
 
+    // 7. Tutup tag channel dan rss
+    xml += `
+</channel>
+</rss>`;
+
+    // 8. Kirim hasilnya
     return new Response(xml, {
-      headers: {
+      headers: { // [FIX 2]
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "public, s-maxage=3600",
+        "Cache-Control": "s-maxage=3600",
       },
     });
   } catch (e) {
-    return new Response(`Error: ${e.message}`, { status: 500 });
+    return new Response(`Server error: ${e.message}`, {
+      status: 500,
+      headers: { "Content-Type": "text-plain" },
+    });
   }
 }
