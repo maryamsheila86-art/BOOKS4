@@ -4,14 +4,14 @@ const CONFIG = {
   title: "Audiobook Collection",
   description: "Listen to the best audiobooks and reviews.", 
   author: "Ebook Library",
-  email: "coro@dalbankeak.co.uk", 
+  email: "admin@flowork.cloud", 
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover", // Pastikan URL ini JPG/PNG valid
+  // Image wajib valid (JPG/PNG, Min 1400x1400)
+  image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
 };
 
-// --- SPINTAX CONFIG ---
 const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:} \
 {Full Version|Unabridged|Complete|Essential} \
 {Guide|Book|Novel|Material}`;
@@ -20,9 +20,7 @@ const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
 // --- HELPER FUNCTIONS ---
 function cdata(str) {
   if (!str) return "";
-  // Hapus karakter 'hantu' yang merusak XML
   let clean = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
-  // Pastikan CDATA tidak crash jika ada CDATA lain di dalamnya
   clean = clean.replace(/]]>/g, "]]]]><![CDATA[>");
   return `<![CDATA[${clean}]]>`;
 }
@@ -52,9 +50,20 @@ function spinTextStable(text, seedStr) {
   });
 }
 
-export async function onRequestGet(context) {
+// -----------------------------------------------------------------
+// PERUBAHAN UTAMA: Ganti 'onRequestGet' jadi 'onRequest'
+// Agar bisa merespon HEAD request dari SoundOn/Firstory
+// -----------------------------------------------------------------
+export async function onRequest(context) {
   const { env, request, params } = context;
   const db = env.DB;
+
+  // Handle jika request method OPTIONS (Pre-flight check)
+  if (request.method === "OPTIONS") {
+    return new Response(null, {
+      headers: { "Access-Control-Allow-Origin": "*" }
+    });
+  }
 
   try {
     const url = new URL(request.url);
@@ -71,7 +80,9 @@ export async function onRequestGet(context) {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(filterKategori);
     }
-    query += " ORDER BY tangal DESC LIMIT 200"; 
+    
+    // LIMIT 50 (Produksi)
+    query += " ORDER BY tangal DESC LIMIT 50"; 
     
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
@@ -79,8 +90,7 @@ export async function onRequestGet(context) {
     const feedTitle = filterKategori ? `${CONFIG.title} - ${filterKategori}` : CONFIG.title;
     const lastBuildDate = new Date().toUTCString();
 
-    // --- XML HEADER ---
-    // Kita gunakan header standar Firstory/Anchor
+    // XML BODY
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
@@ -158,18 +168,18 @@ export async function onRequestGet(context) {
   </channel>
 </rss>`;
 
-    // --- FINAL OUTPUT ---
-    // 1. Trim spasi kosong di awal/akhir
-    const finalOutput = xml.trim();
+    const finalString = xml.trim();
+    const encoder = new TextEncoder();
+    const data = encoder.encode(finalString);
 
-    // 2. Return Response SEDERHANA
-    // Kita pakai content-type 'text/xml' yang lebih aman diterima validator
-    // Kita TIDAK mengirim Content-Length manual agar Cloudflare tidak bingung
-    return new Response(finalOutput, {
+    return new Response(data, {
       status: 200,
       headers: {
-        "Content-Type": "text/xml; charset=utf-8", 
-        "Cache-Control": "max-age=3600"
+        // Kita kembalikan ke standar RSS+XML agar SoundOn mengenali formatnya
+        "Content-Type": "application/rss+xml; charset=utf-8",
+        "Cache-Control": "no-transform",
+        "Content-Length": data.byteLength.toString(),
+        "Access-Control-Allow-Origin": "*" 
       },
     });
 
