@@ -1,37 +1,46 @@
 // Hardcode: /functions/[[path]]/podcast.xml.js
 
-// --- 1. IDENTITAS PODCAST (Ganti URL Image & Email) ---
+// --- CONFIG ---
 const CONFIG = {
   title: "Audiobook Collection",
-  description: "Dengarkan ringkasan dan review buku best-seller dunia. Update setiap hari.",
+  // Deskripsi default jika db kosong
+  description: "Listen to the best audiobooks and reviews.", 
   author: "Ebook Library",
-  email: "admin@flowork.cloud", // Wajib ada untuk validasi
-  language: "en-us",
+  email: "admin@flowork.cloud", 
+  language: "en-us", // Firstory pakai 'en', tapi 'en-us' juga ok
   category: "Arts", 
   subCategory: "Books",
-  // GANTI INI dengan URL gambar JPG/PNG (Min 1400x1400px) valid milikmu
+  // GANTI INI dengan URL gambar 1400x1400 valid
   image: "https://placehold.co/1400x1400/jpg?text=Podcast+Cover",
   siteUrl: "" 
 };
 
-// --- 2. CONFIG SPINTAX ---
+// --- SPINTAX ---
 const SPINTAX_PREFIX = `{Audiobook:|Review:|Summary:|Podcast:|Listening Session:} \
 {Full Version|Unabridged|Complete|Essential} \
 {Guide|Book|Novel|Material}`;
-
 const SPINTAX_SUFFIX = `{High Quality|HQ|Studio Edition|2026}`;
 
-// --- HELPER FUNCTIONS ---
-function escapeXML(str) {
+// --- HELPER: CLEANER & CDATA WRAPPER ---
+// Ini kunci agar tidak error FATAL
+function cdata(str) {
   if (!str) return "";
-  return str.replace(/[<>&"']/g, m => ({
-    "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&#39;"
-  })[m]);
+  // 1. Hapus Control Characters (ASCII 0-31) yang bikin XML rusak
+  // Kecuali Tab(\x09), LF(\x0A), CR(\x0D)
+  let clean = str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+  
+  // 2. Bungkus dengan CDATA agar karakter aneh (&, <, >) dianggap teks aman
+  // Ganti penutup CDATA jika ada di dalam teks
+  clean = clean.replace(/]]>/g, "]]]]><![CDATA[>");
+  return `<![CDATA[${clean}]]>`;
 }
 
-function stripHTML(str) {
+// Fungsi khusus untuk description (harus plain text, no HTML)
+function stripTags(str) {
   if (!str) return "";
-  return str.replace(/<[^>]*>?/gm, "");
+  let text = str.replace(/<[^>]*>?/gm, " "); // Hapus tag HTML
+  text = text.replace(/\s+/g, " ").trim(); // Rapikan spasi
+  return text;
 }
 
 function stringToHash(string) {
@@ -59,14 +68,15 @@ export async function onRequestGet(context) {
   try {
     const url = new URL(request.url);
 
-    // --- DETEKSI ROUTER ---
+    // Deteksi Host (Router Support)
     const forwardedHost = request.headers.get("X-Forwarded-Host");
     const SITE_URL = forwardedHost ? `${url.protocol}//${forwardedHost}` : url.origin;
-    CONFIG.siteUrl = SITE_URL;
+    
+    // Setup Self Link
+    const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // --- QUERY DATABASE ---
+    // Filter Kategori
     const pathSegments = params.path || [];
-    // Ambil kategori dari path pertama (misal: domain.com/novel/podcast.xml -> novel)
     const filterKategori = pathSegments[0] || null;
 
     let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
@@ -77,89 +87,94 @@ export async function onRequestGet(context) {
       queryParams.push(filterKategori);
     }
     
-    query += " ORDER BY tangal DESC LIMIT 100"; 
-
+    query += " ORDER BY tangal DESC LIMIT 50"; 
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
 
     const feedTitle = filterKategori 
       ? `${CONFIG.title} - ${filterKategori}` 
       : CONFIG.title;
-      
-    // Link ke file ini sendiri
-    const selfLink = `${SITE_URL}${url.pathname}`;
 
-    // --- XML HEADER ---
+    // --- XML HEADER (COPY PASTE DARI FIRSTORY) ---
+    // Perhatikan namespace 'spotify' dan 'podcast' yang ditambahkan
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" 
   xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
   xmlns:content="http://purl.org/rss/1.0/modules/content/"
-  xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0"
-  xmlns:atom="http://www.w3.org/2005/Atom">
+  xmlns:podcast="https://podcastindex.org/namespace/1.0"
+  xmlns:atom="http://www.w3.org/2005/Atom"
+  xmlns:spotify="https://www.spotify.com/ns/rss">
   <channel>
-    <title>${escapeXML(feedTitle)}</title>
+    <title>${cdata(feedTitle)}</title>
     <link>${SITE_URL}</link>
-    <description>${escapeXML(CONFIG.description)}</description>
+    <description>${cdata(CONFIG.description)}</description>
     <language>${CONFIG.language}</language>
-    <copyright>Copyright ${new Date().getFullYear()} ${escapeXML(CONFIG.author)}</copyright>
+    <copyright>${cdata(CONFIG.author)}</copyright>
     <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
-    <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
+    <generator>Firstory</generator> <atom:link href="${selfLink}" rel="self" type="application/rss+xml" />
     
-    <itunes:subtitle>${escapeXML(CONFIG.description.substring(0, 200))}</itunes:subtitle>
-    <itunes:author>${escapeXML(CONFIG.author)}</itunes:author>
-    <itunes:summary>${escapeXML(CONFIG.description)}</itunes:summary>
-    <itunes:owner>
-      <itunes:name>${escapeXML(CONFIG.author)}</itunes:name>
-      <itunes:email>${escapeXML(CONFIG.email)}</itunes:email>
+    <itunes:summary>${cdata(CONFIG.description)}</itunes:summary>
+    <itunes:author>${cdata(CONFIG.author)}</itunes:author>
+    <itunes:type>episodic</itunes:type>
+    <itunes:explicit>no</itunes:explicit> <itunes:owner>
+      <itunes:name>${cdata(CONFIG.author)}</itunes:name>
+      <itunes:email>${CONFIG.email}</itunes:email>
     </itunes:owner>
     <itunes:image href="${CONFIG.image}"/>
-    <itunes:category text="${escapeXML(CONFIG.category)}">
-      <itunes:category text="${escapeXML(CONFIG.subCategory)}"/>
+    <itunes:category text="${CONFIG.category}">
+      <itunes:category text="${CONFIG.subCategory}"/>
     </itunes:category>
-    <itunes:explicit>false</itunes:explicit>
-    <itunes:type>episodic</itunes:type>
 `;
 
     for (const post of results) {
-      // URL Audio mengarah ke file generator MP3
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
 
-      // Spintax Judul
+      // Spintax
       const seed = post.KodeUnik || post.Judul;
       const t_prefix = spinTextStable(SPINTAX_PREFIX, seed + "ppref");
       const t_suffix = spinTextStable(SPINTAX_SUFFIX, seed + "psuff");
       const finalTitle = `${t_prefix} ${post.Judul} ${t_suffix}`;
 
-      // Deskripsi
-      const rawDesc = stripHTML(post.Deskripsi || "Listen to this audiobook.");
-      const htmlDesc = `
-        <p>${escapeXML(post.Deskripsi || "")}</p>
-        <p>Title: <strong>${escapeXML(post.Judul)}</strong></p>
-        <p>Visit: <a href="${postUrl}">${escapeXML(CONFIG.title)}</a></p>
+      // Deskripsi: Firstory memisahkan Plain Text vs HTML
+      const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
+      
+      // HTML Content (Show Notes)
+      // Kita bungkus HTML postingan agar tampil rapi di Spotify
+      const htmlContent = `
+        <p>${post.Deskripsi || ""}</p>
+        <hr/>
+        <p><strong>Title:</strong> ${post.Judul}</p>
+        <p><strong>Listen here:</strong> <a href="${postUrl}">${postUrl}</a></p>
       `;
 
-      // Image Episode (Proxy)
+      // Image Episode
       let episodeImage = CONFIG.image;
       if (post.Image) {
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}`;
       }
 
-      // Dummy Size (Consistent per book)
-      const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
+      // Size & Duration Dummy
+      const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000); // Bytes
+      const dummyDuration = 600 + (stringToHash(seed + "dur") % 1200); // Seconds
 
       xml += `
     <item>
-      <title>${escapeXML(finalTitle)}</title>
+      <title>${cdata(finalTitle)}</title>
       <link>${postUrl}</link>
-      <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : new Date().toUTCString()}</pubDate>
       <guid isPermaLink="false">${post.KodeUnik}</guid>
-      <enclosure url="${audioUrl}" length="${dummySize}" type="audio/mpeg"/>
-      <description>${escapeXML(rawDesc.substring(0, 400))}...</description>
-      <content:encoded><![CDATA[${htmlDesc}]]></content:encoded>
-      <itunes:duration>1200</itunes:duration>
-      <itunes:explicit>false</itunes:explicit>
-      <itunes:image href="${escapeXML(episodeImage)}"/>
+      <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : new Date().toUTCString()}</pubDate>
+      
+      <enclosure url="${audioUrl}" type="audio/mpeg" length="${dummySize}"/>
+      
+      <description>${cdata(rawDesc.substring(0, 300) + "...")}</description>
+      
+      <content:encoded>${cdata(htmlContent)}</content:encoded>
+      
+      <itunes:duration>${dummyDuration}</itunes:duration>
+      <itunes:explicit>no</itunes:explicit>
+      <itunes:image href="${episodeImage}"/>
+      <itunes:episodeType>full</itunes:episodeType>
     </item>
 `;
     }
@@ -168,7 +183,8 @@ export async function onRequestGet(context) {
   </channel>
 </rss>`;
 
-    return new Response(xml, {
+    // .trim() di akhir sangat PENTING untuk hapus spasi kosong penyebab error
+    return new Response(xml.trim(), {
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
         "Cache-Control": "public, s-maxage=3600", 
@@ -176,6 +192,6 @@ export async function onRequestGet(context) {
     });
 
   } catch (e) {
-    return new Response(`XML Error: ${e.message}`, { status: 500 });
+    return new Response(`XML Gen Error: ${e.message}`, { status: 500 });
   }
 }
