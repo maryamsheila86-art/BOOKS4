@@ -4,7 +4,7 @@ const TOTAL_TRACKS = 1;
 
 // [PERBAIKAN] Sesuaikan dengan lokasi aslimu di 'public/audio'
 // Script akan mencari: /audio/track_001.mp3
-const AUDIO_PATH_PREFIX = "/audio/track_"; 
+const AUDIO_PATH_PREFIX = "/audio-v2/track_"; 
 const AUDIO_PATH_SUFFIX = ".mp3";
 
 function simpleHash(str) {
