@@ -4,7 +4,6 @@ const DEFAULT_CONFIG = {
   language: "en-us",
   category: "Arts", 
   subCategory: "Books",
-  // Kita tidak pakai default image di sini lagi karena pakai Picsum
 };
 
 // --- SPINTAX CONFIG ---
@@ -119,14 +118,13 @@ export async function onRequest(context) {
     const lastBuildDate = new Date().toUTCString();
 
     // ============================================================
-    // 🚀 FIX ARTWORK WARNING: TAMBAH PARAMETER PALSU &fake=.jpg
+    // [FIXED] Ganti '&' menjadi '&amp;' agar XML Valid
     // ============================================================
     const picsumSeed = identitySeed || "default";
     const rawPicsumUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
     
-    // Kita tambahkan parameter '&ext=.jpg' agar URL diakhiri dengan .jpg
-    // Script image-proxy.js tidak akan peduli, tapi validator akan senang.
-    const channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(rawPicsumUrl)}&ext=.jpg`;
+    // Perhatikan: '&amp;' bukan '&'
+    const channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(rawPicsumUrl)}&amp;ext=.jpg`;
     // ============================================================
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -166,11 +164,10 @@ export async function onRequest(context) {
       
       const htmlContent = `<p>${post.Deskripsi || ""}</p><hr/><p><strong>Episode Info:</strong> ${post.Judul}</p>${pinterestPart}${tier2Part}<p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>`;
 
-      // UPDATE JUGA UNTUK GAMBAR EPISODE
       let episodeImage = channelCoverUrl; 
       if (post.Image) {
-        // Tambah &ext=.jpg di sini juga
-        episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}&ext=.jpg`;
+        // [FIXED] Ganti '&' menjadi '&amp;' di sini juga
+        episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}&amp;ext=.jpg`;
       }
 
       const dummySize = 3000000 + (stringToHash(seed + "size") % 5000000);
