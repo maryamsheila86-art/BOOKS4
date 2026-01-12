@@ -86,7 +86,7 @@ export async function onRequest(context) {
     const emailUser = usernameParam || "contact";
     const emailDomain = getRootDomain(CURRENT_HOST);
     const DYNAMIC_EMAIL = `${emailUser}@${emailDomain}`;
-    // Seed Identitas Feed (Agar Unik per URL)
+    // Seed Identitas Feed
     const identitySeed = (categoryParam || "") + (usernameParam || "");
     
     const dynamicFeedTitle = spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
@@ -104,16 +104,11 @@ export async function onRequest(context) {
         if (!rawTier2Url.startsWith("http")) rawTier2Url = "https://" + rawTier2Url;
     }
 
-    // ============================================================
-    // [LIMIT RANDOM] 100 - 190 Postingan Per Hari
-    // ============================================================
+    // [LIMIT RANDOM] 100 - 190 per hari
     const todayStr = new Date().toISOString().slice(0, 10); 
     const dailyHash = stringToHash(todayStr + identitySeed);
-    // Modulo 91 menghasilkan 0-90. Ditambah 100 jadi 100-190.
     const dynamicLimit = 100 + (dailyHash % 91); 
-    // ============================================================
 
-    // Query Database dengan Limit Dinamis
     const queryParams = [];
     let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
     if (categoryParam) {
@@ -128,7 +123,6 @@ export async function onRequest(context) {
     const lastBuildDate = new Date().toUTCString();
     const picsumSeed = identitySeed || "default";
     const rawPicsumUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
-    // Gunakan &amp; agar valid XML
     const channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(rawPicsumUrl)}&amp;ext=.jpg`;
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -156,24 +150,27 @@ export async function onRequest(context) {
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
       
-      // Seed Modular: ID Buku + ID Feed (agar judul unik di setiap URL feed)
       const seed = (post.KodeUnik || post.Judul) + identitySeed;
 
       const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
       let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
       let akhiran = isMultiLang ? spinTextStable("{2025|2026|Full}", seed + "suffix") : spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
-      const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
+      
+      // Ambil teks deskripsi bersih
+      const rawDescText = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
       // ============================================================
-      // [FIX] KONTROL BACKLINK (PINTEREST & TIER 2)
-      // Hanya muncul di 70% postingan (Jika luckFactor < 70)
+      // [FIX] GENERATE BACKLINK HTML (PINTEREST & TIER 2)
+      // Kita generate stringnya dulu di sini agar bisa dipakai di <description>
       // ============================================================
       let pinterestPart = "";
       let tier2Part = "";
 
+      // 1. Hitung Nasib Backlink (0-100)
       const luckFactor = stringToHash(seed + "backlinkLuck") % 100;
       
+      // 2. Jika Luck < 70 (70% Chance), buat HTML Link-nya
       if (luckFactor < 70) {
           if (rawPinterestUrl) {
               pinterestPart = `<p>📌 ${spinTextStable(PINTEREST_INTRO, seed + "pintro")}: <a href="${rawPinterestUrl}">${spinTextStable(PINTEREST_ANCHOR, seed + "panchor")}</a></p>`;
@@ -182,10 +179,15 @@ export async function onRequest(context) {
               tier2Part = `<p>🎧 ${spinTextStable(TIER2_INTRO, seed + "tintro")} <strong><a href="${rawTier2Url}">${spinTextStable(TIER2_ANCHOR, seed + "tanchor")}</a></strong></p>`;
           }
       }
-      // Jika luckFactor >= 70, variabel tetap string kosong ("")
       // ============================================================
       
+      // [FIX UTAMA] Masukkan Backlink ke HTML Content (Encoded)
       const htmlContent = `<p>${post.Deskripsi || ""}</p><hr/><p><strong>Episode Info:</strong> ${post.Judul}</p>${pinterestPart}${tier2Part}<p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>`;
+      
+      // [FIX UTAMA] Masukkan Backlink juga ke Description (Visible)
+      // Kita bungkus dengan CDATA agar HTML link-nya terbaca browser/bot sebagai link klik-able
+      // Jika tidak di CDATA, linknya akan jadi teks biasa.
+      const descWithLinks = `${rawDescText.substring(0, 300)}... <br/><br/>${pinterestPart}${tier2Part}`;
 
       let episodeImage = channelCoverUrl; 
       if (post.Image) {
@@ -201,7 +203,7 @@ export async function onRequest(context) {
 <guid isPermaLink="false">${post.KodeUnik}</guid>
 <pubDate>${post.tangal ? new Date(post.tangal).toUTCString() : lastBuildDate}</pubDate>
 <enclosure url="${audioUrl}" type="audio/mpeg" length="${dummySize}"/>
-<description>${cdata(rawDesc.substring(0, 300) + "...")}</description>
+<description>${cdata(descWithLinks)}</description>
 <content:encoded>${cdata(htmlContent)}</content:encoded>
 <itunes:duration>${dummyDuration}</itunes:duration>
 <itunes:explicit>no</itunes:explicit>
@@ -220,7 +222,7 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        // [CACHE UPDATE] 6 Jam (21600 detik)
+        // Cache 6 Jam
         "Cache-Control": "public, max-age=21600, s-maxage=21600, no-transform",
         "Content-Length": data.byteLength.toString(),
         "Access-Control-Allow-Origin": "*" 
