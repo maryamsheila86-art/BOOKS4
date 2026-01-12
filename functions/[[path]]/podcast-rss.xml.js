@@ -86,7 +86,6 @@ export async function onRequest(context) {
     const emailUser = usernameParam || "contact";
     const emailDomain = getRootDomain(CURRENT_HOST);
     const DYNAMIC_EMAIL = `${emailUser}@${emailDomain}`;
-    // Seed Identitas Feed
     const identitySeed = (categoryParam || "") + (usernameParam || "");
     
     const dynamicFeedTitle = spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
@@ -104,7 +103,6 @@ export async function onRequest(context) {
         if (!rawTier2Url.startsWith("http")) rawTier2Url = "https://" + rawTier2Url;
     }
 
-    // [LIMIT RANDOM] 100 - 190 per hari
     const todayStr = new Date().toISOString().slice(0, 10); 
     const dailyHash = stringToHash(todayStr + identitySeed);
     const dynamicLimit = 100 + (dailyHash % 91); 
@@ -156,21 +154,13 @@ export async function onRequest(context) {
       let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
       let akhiran = isMultiLang ? spinTextStable("{2025|2026|Full}", seed + "suffix") : spinTextStable(SPINTAX_SUFFIX, seed + "suffix");
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
-      
-      // Ambil teks deskripsi bersih
       const rawDescText = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
-      // ============================================================
-      // [FIX] GENERATE BACKLINK HTML (PINTEREST & TIER 2)
-      // Kita generate stringnya dulu di sini agar bisa dipakai di <description>
-      // ============================================================
+      // 1. Generate Backlink (Disimpan dulu)
       let pinterestPart = "";
       let tier2Part = "";
-
-      // 1. Hitung Nasib Backlink (0-100)
       const luckFactor = stringToHash(seed + "backlinkLuck") % 100;
       
-      // 2. Jika Luck < 70 (70% Chance), buat HTML Link-nya
       if (luckFactor < 70) {
           if (rawPinterestUrl) {
               pinterestPart = `<p>📌 ${spinTextStable(PINTEREST_INTRO, seed + "pintro")}: <a href="${rawPinterestUrl}">${spinTextStable(PINTEREST_ANCHOR, seed + "panchor")}</a></p>`;
@@ -179,15 +169,25 @@ export async function onRequest(context) {
               tier2Part = `<p>🎧 ${spinTextStable(TIER2_INTRO, seed + "tintro")} <strong><a href="${rawTier2Url}">${spinTextStable(TIER2_ANCHOR, seed + "tanchor")}</a></strong></p>`;
           }
       }
+
+      // ============================================================
+      // [FIX POSISI] PRIORITAS LINK DOWNLOAD
+      // Urutan: Deskripsi -> Download -> Baru Backlink (Paling Bawah)
       // ============================================================
       
-      // [FIX UTAMA] Masukkan Backlink ke HTML Content (Encoded)
-      const htmlContent = `<p>${post.Deskripsi || ""}</p><hr/><p><strong>Episode Info:</strong> ${post.Judul}</p>${pinterestPart}${tier2Part}<p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>`;
+      // Untuk <content:encoded> (HTML Lengkap)
+      const htmlContent = `
+        <p>${post.Deskripsi || ""}</p>
+        <hr/>
+        <p><strong>Episode Info:</strong> ${post.Judul}</p>
+        <p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>
+        ${pinterestPart}
+        ${tier2Part}
+      `;
       
-      // [FIX UTAMA] Masukkan Backlink juga ke Description (Visible)
-      // Kita bungkus dengan CDATA agar HTML link-nya terbaca browser/bot sebagai link klik-able
-      // Jika tidak di CDATA, linknya akan jadi teks biasa.
-      const descWithLinks = `${rawDescText.substring(0, 300)}... <br/><br/>${pinterestPart}${tier2Part}`;
+      // Untuk <description> (Teks Pendek + Link Penting)
+      const descWithLinks = `${rawDescText.substring(0, 300)}... <br/>⬇️ <strong><a href="${postUrl}">Download Audio</a></strong><br/><br/>${pinterestPart}${tier2Part}`;
+      // ============================================================
 
       let episodeImage = channelCoverUrl; 
       if (post.Image) {
@@ -222,7 +222,6 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        // Cache 6 Jam
         "Cache-Control": "public, max-age=21600, s-maxage=21600, no-transform",
         "Content-Length": data.byteLength.toString(),
         "Access-Control-Allow-Origin": "*" 
