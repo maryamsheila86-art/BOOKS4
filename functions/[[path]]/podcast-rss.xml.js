@@ -156,7 +156,7 @@ export async function onRequest(context) {
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
       const rawDescText = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
-      // 1. Generate Backlink (Disimpan dulu)
+      // 1. Generate Backlink (Disimpan dulu - 70% Chance)
       let pinterestPart = "";
       let tier2Part = "";
       const luckFactor = stringToHash(seed + "backlinkLuck") % 100;
@@ -171,22 +171,30 @@ export async function onRequest(context) {
       }
 
       // ============================================================
-      // [FIX POSISI] PRIORITAS LINK DOWNLOAD
-      // Urutan: Deskripsi -> Download -> Baru Backlink (Paling Bawah)
+      // [FIX TAMPILAN] TOMBOL DOWNLOAD PDF/EPUB + JUDUL BUKU
       // ============================================================
       
+      // Kata-kata CTA yang bervariasi tapi JELAS:
+      // Contoh: "DOWNLOAD: Harry Potter (PDF/Epub)"
+      const ctaPrefix = spinTextStable("{DOWNLOAD|GET BOOK|READ NOW|ACCESS FILE}", seed + "cta");
+      const ctaFormat = spinTextStable("{PDF/Epub|Ebook Format|Full PDF|Digital Book}", seed + "format");
+      
+      // Live Link Text yang akan diklik
+      const liveLinkText = `📥 ${ctaPrefix}: ${post.Judul} (${ctaFormat})`;
+
       // Untuk <content:encoded> (HTML Lengkap)
       const htmlContent = `
         <p>${post.Deskripsi || ""}</p>
         <hr/>
-        <p><strong>Episode Info:</strong> ${post.Judul}</p>
-        <p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>
+        <p><strong>Title:</strong> ${post.Judul}</p>
+        <h2><a href="${postUrl}">${liveLinkText}</a></h2>
         ${pinterestPart}
         ${tier2Part}
       `;
       
-      // Untuk <description> (Teks Pendek + Link Penting)
-      const descWithLinks = `${rawDescText.substring(0, 300)}... <br/>⬇️ <strong><a href="${postUrl}">Download Audio</a></strong><br/><br/>${pinterestPart}${tier2Part}`;
+      // Untuk <description> (Teks Pendek + Live Link Menonjol)
+      // Kita pakai tag <a> agar platform yang support HTML akan merendernya sebagai link aktif
+      const descWithLinks = `${rawDescText.substring(0, 300)}... <br/><br/>👉 <strong><a href="${postUrl}">${liveLinkText}</a></strong><br/><br/>${pinterestPart}${tier2Part}`;
       // ============================================================
 
       let episodeImage = channelCoverUrl; 
