@@ -86,6 +86,7 @@ export async function onRequest(context) {
     const emailUser = usernameParam || "contact";
     const emailDomain = getRootDomain(CURRENT_HOST);
     const DYNAMIC_EMAIL = `${emailUser}@${emailDomain}`;
+    // Seed Identitas Feed (Agar Unik per URL)
     const identitySeed = (categoryParam || "") + (usernameParam || "");
     
     const dynamicFeedTitle = spinTextStable(FEED_TITLE_SPIN, identitySeed + "title");
@@ -103,29 +104,32 @@ export async function onRequest(context) {
         if (!rawTier2Url.startsWith("http")) rawTier2Url = "https://" + rawTier2Url;
     }
 
-    // QUERY DB
+    // ============================================================
+    // [LIMIT RANDOM] 100 - 190 Postingan Per Hari
+    // ============================================================
+    const todayStr = new Date().toISOString().slice(0, 10); 
+    const dailyHash = stringToHash(todayStr + identitySeed);
+    // Modulo 91 menghasilkan 0-90. Ditambah 100 jadi 100-190.
+    const dynamicLimit = 100 + (dailyHash % 91); 
+    // ============================================================
+
+    // Query Database dengan Limit Dinamis
     const queryParams = [];
     let query = "SELECT Judul, Deskripsi, Image, KodeUnik, tangal FROM Buku WHERE tangal <= DATE('now')";
     if (categoryParam) {
       query += " AND UPPER(Kategori) = UPPER(?)";
       queryParams.push(categoryParam);
     }
-    query += " ORDER BY tangal DESC LIMIT 50"; 
+    query += ` ORDER BY tangal DESC LIMIT ${dynamicLimit}`; 
     
     const stmt = db.prepare(query).bind(...queryParams);
     const { results } = await stmt.all();
 
     const lastBuildDate = new Date().toUTCString();
-
-    // ============================================================
-    // [FIXED] Ganti '&' menjadi '&amp;' agar XML Valid
-    // ============================================================
     const picsumSeed = identitySeed || "default";
     const rawPicsumUrl = `https://picsum.photos/seed/${picsumSeed}/1400/1400`;
-    
-    // Perhatikan: '&amp;' bukan '&'
+    // Gunakan &amp; agar valid XML
     const channelCoverUrl = `${SITE_URL}/image-proxy?url=${encodeURIComponent(rawPicsumUrl)}&amp;ext=.jpg`;
-    // ============================================================
 
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:podcast="https://podcastindex.org/namespace/1.0" xmlns:atom="http://www.w3.org/2005/Atom">
@@ -151,7 +155,9 @@ export async function onRequest(context) {
     for (const post of results) {
       const audioUrl = `${SITE_URL}/podcast-audio/${post.KodeUnik}.mp3`;
       const postUrl = `${SITE_URL}/post/${post.KodeUnik}`;
-      const seed = post.KodeUnik || post.Judul;
+      
+      // Seed Modular: ID Buku + ID Feed (agar judul unik di setiap URL feed)
+      const seed = (post.KodeUnik || post.Judul) + identitySeed;
 
       const isMultiLang = (stringToHash(seed + "langType") % 100) < 50; 
       let awalan = isMultiLang ? spinTextStable(MULTI_LANG_PREFIX, seed + "prefix") : spinTextStable(SPINTAX_PREFIX, seed + "prefix");
@@ -159,14 +165,30 @@ export async function onRequest(context) {
       const finalTitle = `${awalan} ${post.Judul} ${akhiran}`;
       const rawDesc = stripTags(post.Deskripsi || "Listen to this audiobook.");
 
-      let pinterestPart = rawPinterestUrl ? `<p>📌 ${spinTextStable(PINTEREST_INTRO, seed + "pintro")}: <a href="${rawPinterestUrl}">${spinTextStable(PINTEREST_ANCHOR, seed + "panchor")}</a></p>` : "";
-      let tier2Part = rawTier2Url ? `<p>🎧 ${spinTextStable(TIER2_INTRO, seed + "tintro")} <strong><a href="${rawTier2Url}">${spinTextStable(TIER2_ANCHOR, seed + "tanchor")}</a></strong></p>` : "";
+      // ============================================================
+      // [FIX] KONTROL BACKLINK (PINTEREST & TIER 2)
+      // Hanya muncul di 70% postingan (Jika luckFactor < 70)
+      // ============================================================
+      let pinterestPart = "";
+      let tier2Part = "";
+
+      const luckFactor = stringToHash(seed + "backlinkLuck") % 100;
+      
+      if (luckFactor < 70) {
+          if (rawPinterestUrl) {
+              pinterestPart = `<p>📌 ${spinTextStable(PINTEREST_INTRO, seed + "pintro")}: <a href="${rawPinterestUrl}">${spinTextStable(PINTEREST_ANCHOR, seed + "panchor")}</a></p>`;
+          }
+          if (rawTier2Url) {
+              tier2Part = `<p>🎧 ${spinTextStable(TIER2_INTRO, seed + "tintro")} <strong><a href="${rawTier2Url}">${spinTextStable(TIER2_ANCHOR, seed + "tanchor")}</a></strong></p>`;
+          }
+      }
+      // Jika luckFactor >= 70, variabel tetap string kosong ("")
+      // ============================================================
       
       const htmlContent = `<p>${post.Deskripsi || ""}</p><hr/><p><strong>Episode Info:</strong> ${post.Judul}</p>${pinterestPart}${tier2Part}<p>⬇️ <strong>File Access:</strong> <a href="${postUrl}">Download ${post.Judul}</a></p>`;
 
       let episodeImage = channelCoverUrl; 
       if (post.Image) {
-        // [FIXED] Ganti '&' menjadi '&amp;' di sini juga
         episodeImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(post.Image)}&amp;ext=.jpg`;
       }
 
@@ -198,7 +220,8 @@ export async function onRequest(context) {
       status: 200,
       headers: {
         "Content-Type": "application/rss+xml; charset=utf-8",
-        "Cache-Control": "no-transform",
+        // [CACHE UPDATE] 6 Jam (21600 detik)
+        "Cache-Control": "public, max-age=21600, s-maxage=21600, no-transform",
         "Content-Length": data.byteLength.toString(),
         "Access-Control-Allow-Origin": "*" 
       },
