@@ -2,7 +2,7 @@
 
 const TOTAL_TRACKS = 1;
 // Pastikan ini mengarah ke file fisik yang SUDAH ada ID3-nya
-const AUDIO_PATH_PREFIX = "/audio/audio_finale"; 
+const AUDIO_PATH_PREFIX = "/audio/audio_fixed"; 
 const AUDIO_PATH_SUFFIX = ".mp3"; 
 
 export async function onRequest(context) {
