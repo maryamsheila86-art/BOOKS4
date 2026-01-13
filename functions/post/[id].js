@@ -45,42 +45,94 @@ async function fetchGoogleBooks(isbn) {
     return { found: false };
 }
 
-// 3. DIRECT GOODREADS SCRAPING (STEP 1)
-async function scrapeDirectGoodreads(id) {
+// 3. GOODREADS SEARCH (BY ASIN) - [FIX: ANTI-AUTHOR]
+async function scrapeGoodreadsSearch(asin) {
     try {
-        const url = `https://www.goodreads.com/book/show/${id}`;
-        // Gunakan User-Agent browser asli agar tidak langsung diblokir
+        const url = `https://www.goodreads.com/search?q=${asin}`;
         const r = await fetch(url, {
             headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         });
         
-        if (!r.ok) return { found: false }; // Kalau 403/404 langsung skip
-        
         const html = await r.text();
-        
-        // Regex sederhana untuk ambil Meta Tags OG
-        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
-        const imageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
-        
-        if (titleMatch && titleMatch[1]) {
-            return {
-                found: true,
-                title: titleMatch[1],
-                image: imageMatch ? imageMatch[1] : ""
-            };
+        const finalUrl = r.url;
+
+        // A. CEK JIKA REDIRECT KE HALAMAN BUKU (DETAIL PAGE)
+        if (finalUrl.includes("/book/show/")) {
+            // Di halaman detail, judul biasanya H1
+            const h1Match = html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+            const authorMatch = html.match(/<a class="authorName"[^>]*>.*?<span itemprop="name">([^<]+)<\/span>/s);
+            
+            if (h1Match && h1Match[1]) {
+                return { 
+                    found: true, 
+                    title: h1Match[1].trim(), 
+                    author: authorMatch ? authorMatch[1].trim() : "Goodreads Author" 
+                };
+            }
         }
-    } catch (e) { console.log("Direct GR Error:", e); }
+
+        // B. CEK HALAMAN PENCARIAN (SEARCH RESULT)
+        // KITA CARI: <span ... role="heading" ... aria-level="4" ...> JUDUL </span>
+        // Penulis TIDAK PUNYA role="heading", jadi aman.
+        
+        // Regex ini mencari span yang PUNYA 'role="heading"' DAN 'aria-level="4"' (Urutan atribut bisa bolak-balik)
+        // Kita tidak peduli 'itemprop' lagi karena itu bikin bingung sama author.
+        
+        // Pola 1: role dulu baru aria-level
+        let titleMatch = html.match(/<span[^>]*role="heading"[^>]*aria-level="4"[^>]*>\s*([^<]+)\s*<\//i);
+        
+        // Pola 2: aria-level dulu baru role (Jaga-jaga)
+        if (!titleMatch) {
+            titleMatch = html.match(/<span[^>]*aria-level="4"[^>]*role="heading"[^>]*>\s*([^<]+)\s*<\//i);
+        }
+
+        // Pola 3: Fallback ke Class "bookTitle" (Sangat Spesifik Judul)
+        if (!titleMatch) {
+            titleMatch = html.match(/class="bookTitle"[^>]*>.*?<span[^>]*>([^<]+)<\/span>/s);
+        }
+
+        // Regex untuk Author (Ambil dari class authorName biar gak ketukar)
+        const authorMatch = html.match(/class="authorName"[^>]*>.*?<span itemprop="name">([^<]+)<\/span>/s);
+
+        if (titleMatch && titleMatch[1]) {
+            let title = titleMatch[1].trim();
+            // Bersihkan sampah HTML
+            title = title.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+            
+            let author = authorMatch && authorMatch[1] ? authorMatch[1].trim() : "Amazon Author";
+            return { found: true, title: title, author: author };
+        }
+    } catch (e) { console.log("GR Search Error:", e); }
     return { found: false };
 }
 
-// 4. GOOGLE SEARCH SCRAPING (STEP 3 - FINAL FALLBACK)
-async function scrapeGoogleSearch(query) {
+// 4. DIRECT GOODREADS BOOK PAGE (BY ID)
+async function scrapeDirectGoodreads(id) {
     try {
-        // Mode: Image Search (udm=2)
-        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}&udm=2`;
+        const url = `https://www.goodreads.com/book/show/${id}`;
+        const r = await fetch(url, {
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        if (!r.ok) return { found: false };
+        const html = await r.text();
+        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
+        const imageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+        if (titleMatch && titleMatch[1]) {
+            return { found: true, title: titleMatch[1], image: imageMatch ? imageMatch[1] : "" };
+        }
+    } catch (e) { }
+    return { found: false };
+}
+
+// 5. GOOGLE SEARCH SCRAPING (GENERAL)
+async function scrapeGoogleSearch(query, mode = 'text') {
+    try {
+        const param = mode === 'image' ? '&udm=2' : '';
+        const url = `https://www.google.com/search?q=${encodeURIComponent(query)}${param}`;
         
         const r = await fetch(url, {
             headers: { 
@@ -90,39 +142,31 @@ async function scrapeGoogleSearch(query) {
         
         const html = await r.text();
         
-        // LOGIKA SCRAP NO. 1 DARI HASIL GOOGLE
-        // Google Images biasanya menyimpan gambar dalam script encoded base64 atau url encrypted-tbn0
-        // Kita cari pola src="https://encrypted-tbn0..." yang pertama muncul di body
-        
-        // 1. Ambil Gambar Pertama
-        const imgMatch = html.match(/src="(https:\/\/encrypted-tbn0\.gstatic\.com\/images\?q=[^"]+)"/);
-        let imgUrl = "";
-        if (imgMatch && imgMatch[1]) {
-            imgUrl = imgMatch[1].replace(/&amp;/g, '&');
+        if (mode === 'text') {
+            const h3Match = html.match(/<h3[^>]*>([^<]+)<\/h3>/);
+            if (h3Match && h3Match[1]) {
+                let title = h3Match[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+                title = title.replace(/ - Amazon\.com.*/i, '').replace(/ - Amazon.*/i, '');
+                return { found: true, title: title };
+            }
         }
 
-        // 2. Ambil Judul (Biasanya ada di alt tag atau aria-label dekat gambar)
-        // Ini adalah tebakan terbaik karena struktur Google berubah-ubah
-        // Kita coba cari text yang mengandung "goodreads" di title result
-        const titleMatch = html.match(/alt="([^"]*goodreads[^"]*)"/i) || html.match(/<h3[^>]*>([^<]+)<\/h3>/);
-        
-        let titleTxt = "Google Search Result";
-        if (titleMatch && titleMatch[1]) {
-             titleTxt = titleMatch[1];
-        } else {
-            // Fallback judul dari query jika tidak ketemu di HTML
-            titleTxt = decodeURIComponent(query).replace(/\+/g, ' ');
-        }
-
-        if (imgUrl) {
-            return { found: true, title: titleTxt, image: imgUrl };
+        if (mode === 'image') {
+            const imgMatch = html.match(/src="(https:\/\/encrypted-tbn0\.gstatic\.com\/images\?q=[^"]+)"/);
+            let imgUrl = "";
+            if (imgMatch && imgMatch[1]) imgUrl = imgMatch[1].replace(/&amp;/g, '&');
+            
+            const titleMatch = html.match(/alt="([^"]*goodreads[^"]*)"/i) || html.match(/<h3[^>]*>([^<]+)<\/h3>/);
+            let titleTxt = titleMatch && titleMatch[1] ? titleMatch[1] : decodeURIComponent(query);
+            
+            if (imgUrl) return { found: true, title: titleTxt, image: imgUrl };
         }
 
     } catch (e) { console.log("Google Scrap Error:", e); }
     return { found: false };
 }
 
-// 5. HELPER REDIRECT (MAGIC LINK)
+// 6. HELPER REDIRECT (MAGIC LINK)
 async function getRedirectData(id) {
   try {
     const targetUrl = `https://www.goodreads.com/book_link/follow/3?book_id=${id}&source=compareprices`;
@@ -131,36 +175,55 @@ async function getRedirectData(id) {
         redirect: 'follow'
     });
     const finalUrl = r.url;
-
-    // Cek apakah lari ke Barnes & Noble (Ambil ISBN)
     const bnMatch = finalUrl.match(/ean=(\d{13})/) || finalUrl.match(/\/(\d{13})/);
     if (bnMatch && bnMatch[1]) {
-        return { found: true, type: 'bn', id: bnMatch[1] }; // ISBN Found
+        return { found: true, type: 'bn', id: bnMatch[1] };
     }
   } catch(e) {}
   return { found: false };
 }
 
 // ==================================================================
-// LOGIKA FALLBACK DATA (FIXED SESUAI REQUEST)
+// LOGIKA FALLBACK DATA (FINAL)
 // ==================================================================
 async function getDataFallback(id) {
   let d = { Judul: "Restricted Document", Image: "", Author: "Unknown Author", Kategori: "General", KodeUnik: id };
 
   try {
     // ----------------------------------------------------------------
-    // JALUR 1: AMAZON (Prefix A-)
+    // JALUR 1: AMAZON (Prefix A- atau ASIN)
     // ----------------------------------------------------------------
     if (id.startsWith("A-") || /^B[A-Z0-9]{9}$/.test(id)) {
       const realId = id.startsWith("A-") ? id.substring(2) : id;
+      
+      // 1. GAMBAR
       d.Image = `https://images-na.ssl-images-amazon.com/images/P/${realId}.01.LZZZZZZZ.jpg`;
       d.Kategori = "Kindle Ebook";
       
-      const gb = await fetchGoogleBooks(realId);
-      if (gb.found) {
-          d.Judul = gb.title;
-          if (gb.author) d.Author = gb.author;
-      } else { d.Judul = "Kindle Secure Content"; }
+      // 2. JUDUL: Goodreads Search (Pasti Akurat)
+      const grSearch = await scrapeGoodreadsSearch(realId);
+      if (grSearch.found) {
+          d.Judul = grSearch.title;
+          d.Author = grSearch.author;
+          return d;
+      }
+
+      // 3. JUDUL: Google Search (Cadangan)
+      const gSearch = await scrapeGoogleSearch(`amazon book ${realId}`, 'text');
+      if (gSearch.found) {
+          d.Judul = gSearch.title;
+          d.Author = "Amazon Author"; 
+          return d;
+      }
+
+      // 4. JUDUL: OpenLibrary (Terakhir)
+      try {
+        const r = await fetch(`https://openlibrary.org/search.json?q=${realId}&fields=title`, { cf: { cacheTtl: 86400 } });
+        const j = await r.json();
+        if (j.docs && j.docs.length > 0) d.Judul = j.docs[0].title;
+        else d.Judul = "Restricted Document";
+      } catch (e) { d.Judul = "Restricted Document"; }
+      
       return d;
     }
 
@@ -170,6 +233,7 @@ async function getDataFallback(id) {
     if (id.startsWith("B-") || /^\d{9}[\d|X]$|^\d{13}$/.test(id.replace(/-/g,""))) {
       const realId = id.startsWith("B-") ? id.substring(2) : id;
       const cleanIsbn = realId.replace(/-/g,"");
+      
       d.Image = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`;
 
       const gb = await fetchGoogleBooks(cleanIsbn);
@@ -182,56 +246,47 @@ async function getDataFallback(id) {
     }
 
     // ----------------------------------------------------------------
-    // JALUR 3: GOODREADS ID (Prefix C-) --> LOGIKA BARU
-    // 1. Scrap Direct -> 2. B&N (ISBN) -> 3. Google Search (No 1)
+    // JALUR 3: GOODREADS ID (Prefix C-)
     // ----------------------------------------------------------------
     if (id.startsWith("C-") || /^\d{1,9}$/.test(id)) {
       const realId = id.startsWith("C-") ? id.substring(2) : id;
       
-      // --- LANGKAH 1: COBA SCRAP GOODREADS LANGSUNG ---
+      // STEP 1: SCRAP GOODREADS LANGSUNG
       const grData = await scrapeDirectGoodreads(realId);
       if (grData.found) {
           d.Judul = grData.title;
           d.Image = grData.image;
           d.Kategori = "Goodreads Book";
-          return d; // SUKSES LANGKAH 1, RETURN.
+          return d;
       }
 
-      // --- LANGKAH 2: JIKA GAGAL, COBA LEWAT B&N (AMBIL ISBN) ---
-      // Kita coba cari ISBN via link redirect B&N
+      // STEP 2: LEWAT B&N (AMBIL ISBN)
       const redir = await getRedirectData(realId);
-      let isbnFound = false;
-      
       if (redir.found && redir.type === 'bn') {
-          // Kita dapat ISBN dari B&N, sekarang tembak Google Books pakai ISBN itu
           const gb = await fetchGoogleBooks(redir.id);
           if (gb.found) {
               d.Judul = gb.title;
               d.Author = gb.author;
               if (gb.image) d.Image = gb.image;
               d.Kategori = "B&N Edition";
-              return d; // SUKSES LANGKAH 2, RETURN.
+              return d;
           }
       }
 
-      // --- LANGKAH 3: JIKA MASIH GAGAL, PAKAI GOOGLE SEARCH (IMAGE) ---
-      // Query: "goodreads book [ID]"
-      const gSearch = await scrapeGoogleSearch(`goodreads book ${realId}`);
+      // STEP 3: GOOGLE IMAGE SEARCH
+      const gSearch = await scrapeGoogleSearch(`goodreads book ${realId}`, 'image');
       if (gSearch.found) {
           d.Judul = gSearch.title;
           d.Image = gSearch.image;
           d.Kategori = "Archived Search Result";
-          if (d.Judul === "Restricted Document") d.Judul = "Goodreads ID " + realId; 
       } else {
-          // Gagal Total
           if (d.Judul === "Restricted Document") d.Judul = "Goodreads Secure File";
       }
-      
       return d;
     }
 
     // ----------------------------------------------------------------
-    // JALUR 4: BARNES & NOBLE DIRECT (Prefix D-)
+    // JALUR 4: BARNES & NOBLE (Prefix D-)
     // ----------------------------------------------------------------
     if (id.startsWith("D-")) {
        const realId = id.substring(2);
@@ -250,7 +305,7 @@ async function getDataFallback(id) {
 }
 
 // ==================================================================
-// RENDER HTML TEMPLATE (SAMA SEPERTI SEBELUMNYA)
+// RENDER HTML TEMPLATE
 // ==================================================================
 function renderFakeViewer(post, SITE_URL) {
   const metaDescription = getSpintaxDesc(post.Judul);
