@@ -1,6 +1,6 @@
 // Hardcode: /functions/post/[id].js
 
-// --- SPINTAX DESKRIPSI ---
+// --- SPINTAX DESKRIPSI (Untuk Meta Tag) ---
 const DESC_TEMPLATES = [
   "Read {TITLE} online for free. Download the full PDF or Epub version. High quality digital edition available now.",
   "Get the complete edition of {TITLE}. Instant access to the full book. No registration needed for preview.",
@@ -32,75 +32,110 @@ async function getPostFromDB(db, id) {
 }
 
 // ==================================================================
-// LOGIKA BARU: PREFIX ROUTING (A-, B-, C-)
+// LOGIKA SAKTI: FETCH GAMBAR & JUDUL ASLI (NO MORE ID ONLY)
 // ==================================================================
 async function getDataFallback(id) {
-  // Default Data
+  // Default Data (Hanya dipakai jika Fetch gagal total)
   let data = {
-    Judul: "Digital Document: " + id,
-    Image: "https://via.placeholder.com/300x450?text=Cover+Not+Available",
+    Judul: "Restricted Content (ID: " + id + ")",
+    Image: "https://via.placeholder.com/300x450?text=Restricted",
     KodeUnik: id
   };
 
   try {
-    // KITA CEK HURUF DEPANNYA (PREFIX)
-    
-    // --- KASUS 1: AMAZON (Prefix A-) ---
-    if (id.startsWith("A-")) {
-      // Hapus prefix "A-" untuk dapat Real ID (ASIN)
-      const realId = id.substring(2); 
+    // ---------------------------------------------------------
+    // KASUS 1: AMAZON (Prefix A-)
+    // ---------------------------------------------------------
+    if (id.startsWith("A-") || /^B[A-Z0-9]{9}$/.test(id)) {
+      const realId = id.startsWith("A-") ? id.substring(2) : id;
       
-      // Gunakan Amazon Hacks URL
+      // 1. GAMBAR: Langsung dari Amazon (Metode Hack #7 - Pasti Sukses)
       data.Image = `https://images-na.ssl-images-amazon.com/images/P/${realId}.01.LZZZZZZZ.jpg`;
-      data.Judul = "Amazon Digital Edition: " + realId;
-      return data;
-    }
-
-    // --- KASUS 2: OPEN LIBRARY / ISBN (Prefix B-) ---
-    if (id.startsWith("B-")) {
-      // Hapus prefix "B-" untuk dapat Real ID (ISBN)
-      const realId = id.substring(2);
       
-      // Gunakan Open Library Cover API
-      data.Image = `https://covers.openlibrary.org/b/isbn/${realId}-L.jpg`;
-      data.Judul = "ISBN Archive: " + realId;
-      return data;
-    }
-
-    // --- KASUS 3: GOODREADS (Prefix C-) ---
-    if (id.startsWith("C-")) {
-      // Hapus prefix "C-" untuk dapat Real ID (Goodreads ID)
-      const realId = id.substring(2);
-      
-      // Scraping Ringan ke Goodreads
-      const response = await fetch(`https://www.goodreads.com/book/show/${realId}`, {
-        headers: { 
-            'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' 
+      // 2. JUDUL: Kita cari ASIN ini di OpenLibrary
+      // Karena kita gak bisa scrape Amazon langsung (kena blokir), kita tanya ke OpenLib
+      try {
+        const searchUrl = `https://openlibrary.org/search.json?q=${realId}&fields=title`;
+        const resp = await fetch(searchUrl, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Cloudflare Worker)' },
+            cf: { cacheTtl: 86400 } // Cache 1 hari
+        });
+        
+        if (resp.ok) {
+            const json = await resp.json();
+            if (json.docs && json.docs.length > 0) {
+                // KETEMU! Pakai Judul Asli
+                data.Judul = json.docs[0].title;
+            } else {
+                // Jika gak ketemu, pakai fallback yang terlihat profesional
+                data.Judul = "Kindle Digital Edition (Protected)"; 
+            }
         }
-      });
+      } catch (err) {
+         data.Judul = "Kindle Digital Edition (Protected)";
+      }
+      
+      return data;
+    }
 
-      if (response.ok) {
-        const html = await response.text();
-        
-        // Ambil Gambar & Judul dari Meta Tag
-        const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
-        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
-        
-        if (imgMatch && imgMatch[1]) data.Image = imgMatch[1];
-        if (titleMatch && titleMatch[1]) data.Judul = titleMatch[1];
-      } else {
-        // Jika fetch gagal (misal 404), set judul dummy
-        data.Judul = "Goodreads Book ID: " + realId;
+    // ---------------------------------------------------------
+    // KASUS 2: OPEN LIBRARY / ISBN (Prefix B-)
+    // ---------------------------------------------------------
+    if (id.startsWith("B-") || /^\d{9}[\d|X]$|^\d{13}$/.test(id.replace(/-/g,""))) {
+      const realId = id.startsWith("B-") ? id.substring(2) : id;
+      const cleanIsbn = realId.replace(/-/g,"");
+
+      // 1. GAMBAR: Direct Link
+      data.Image = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`;
+      
+      // 2. JUDUL: Fetch API OpenLibrary (ISBN Endpoint)
+      try {
+          const isbnUrl = `https://openlibrary.org/isbn/${cleanIsbn}.json`;
+          const resp = await fetch(isbnUrl, { cf: { cacheTtl: 86400 } });
+          if (resp.ok) {
+              const json = await resp.json();
+              if (json.title) {
+                  data.Judul = json.title; // JUDUL ASLI
+              } else {
+                  data.Judul = "Archived Document";
+              }
+          }
+      } catch (e) {
+          data.Judul = "Archived Document";
       }
       return data;
     }
 
-    // --- KASUS LAIN (JIKA TIDAK ADA PREFIX ATAU FORMAT SALAH) ---
-    // Cek apakah dia ASIN murni atau ISBN murni tanpa prefix (Jaga-jaga)
-    if (/^B[A-Z0-9]{9}$/.test(id)) { // ASIN Murni
-        data.Image = `https://images-na.ssl-images-amazon.com/images/P/${id}.01.LZZZZZZZ.jpg`;
-    } else if (/^\d{9}[\d|X]|\d{13}$/.test(id)) { // ISBN Murni
-        data.Image = `https://covers.openlibrary.org/b/isbn/${id}-L.jpg`;
+    // ---------------------------------------------------------
+    // KASUS 3: GOODREADS (Prefix C-)
+    // ---------------------------------------------------------
+    if (id.startsWith("C-") || /^\d{1,9}$/.test(id)) {
+      const realId = id.startsWith("C-") ? id.substring(2) : id;
+      
+      // SCRAPING: Kita ambil Meta Tag (Title & Image)
+      const grResponse = await fetch(`https://www.goodreads.com/book/show/${realId}`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1;)' }
+      });
+
+      if (grResponse.ok) {
+        const html = await grResponse.text();
+        
+        // Regex untuk Gambar
+        const imgMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
+        // Regex untuk Judul
+        const titleMatch = html.match(/<meta property="og:title" content="([^"]+)"/);
+        
+        if (imgMatch && imgMatch[1]) {
+            data.Image = imgMatch[1];
+        }
+        
+        if (titleMatch && titleMatch[1]) {
+            data.Judul = titleMatch[1]; // JUDUL ASLI DARI GOODREADS
+        } else {
+            data.Judul = "Goodreads Document"; // Fallback jika gagal scrape judul
+        }
+      }
+      return data;
     }
 
   } catch (e) {
@@ -120,7 +155,6 @@ function renderFakeViewer(post, SITE_URL) {
   if (coverImage && coverImage.startsWith("http")) {
      coverImage = `${SITE_URL}/image-proxy?url=${encodeURIComponent(coverImage)}`;
   } else {
-     // Fallback jika image kosong
      coverImage = "https://via.placeholder.com/300x450?text=Restricted";
   }
 
@@ -211,10 +245,14 @@ function renderFakeViewer(post, SITE_URL) {
             <div class="modal-body">
                 <h3 style="margin-top: 0; color: #333;">Registration Required</h3>
                 <img src="${coverImage}" class="modal-cover" onerror="this.src='https://via.placeholder.com/100x150?text=Book'">
+                
                 <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
-                    You need a verified account to download or read <strong>${post.Judul}</strong>.
-                    <br>Sign up takes less than 2 minutes.
+                    You need a verified account to access:
+                    <br>
+                    <strong style="font-size: 16px; color: #333; display:block; margin: 5px 0;">${post.Judul}</strong>
+                    <span style="font-size: 13px;">Sign up takes less than 2 minutes.</span>
                 </p>
+
                 <button class="btn btn-signup" onclick="openMyLinks()">Create Free Account</button>
                 <button class="btn btn-download" onclick="openMyLinks()">Download PDF</button>
             </div>
